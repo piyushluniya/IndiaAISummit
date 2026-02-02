@@ -1,0 +1,28 @@
+# Honeypot Scam Detection System Dependencies
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Data Validation
+pydantic==2.5.3
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Google Gemini AI
+google-generativeai==0.3.2
+
+# HTTP Client
+requests==2.31.0
+
+# Form Data Handling
+python-multipart==0.0.6
+
+# ASGI Server (Production)
+gunicorn==21.2.0
+
+# Development Dependencies (optional)
+# pytest==7.4.4
+# pytest-asyncio==0.23.3
+# httpx==0.26.0
