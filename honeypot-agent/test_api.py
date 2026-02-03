@@ -64,7 +64,7 @@ def make_request(
         if method.upper() == "GET":
             response = requests.get(url, headers=headers, params=params, timeout=30)
         elif method.upper() == "POST":
-            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response = requests.post(url, headers=headers, json=data, params=params, timeout=30)
         elif method.upper() == "DELETE":
             response = requests.delete(url, headers=headers, timeout=30)
         else:
