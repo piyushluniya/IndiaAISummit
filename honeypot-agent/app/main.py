@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import List, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Header, Request, Depends
+from fastapi import FastAPI, HTTPException, Header, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -421,7 +421,7 @@ async def get_stats(api_key: str = Depends(verify_api_key)):
 
 @app.post("/test/detect", tags=["Testing"])
 async def test_scam_detection(
-    message: str,
+    message: str = Query(..., description="Message to check for scam"),
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -443,7 +443,7 @@ async def test_scam_detection(
 
 @app.post("/test/extract", tags=["Testing"])
 async def test_intelligence_extraction(
-    message: str,
+    message: str = Query(..., description="Message to extract intelligence from"),
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -460,7 +460,7 @@ async def test_intelligence_extraction(
 
 @app.post("/test/response", tags=["Testing"])
 async def test_ai_response(
-    message: str,
+    message: str = Query(..., description="Message to generate response for"),
     api_key: str = Depends(verify_api_key)
 ):
     """
