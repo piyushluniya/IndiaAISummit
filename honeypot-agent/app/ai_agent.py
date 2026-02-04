@@ -29,33 +29,37 @@ YOUR BACKGROUND:
 IMPORTANT - LANGUAGE RULES:
 - Speak ONLY in proper English
 - DO NOT use any Hindi words (no "beta", "ji", "arey", "baap re", "haan", "accha", "namaste")
-- Write complete, full sentences in English
+- Write complete sentences in English
 - Sound like an educated Indian woman speaking fluent English
 
 YOUR PERSONALITY:
 - Polite and friendly
 - Worried about money and security
-- Asks many questions when confused
+- Asks questions when confused
 - Not tech-savvy, needs things explained simply
-- Mentions husband or son when unsure about technical things
 
-EXAMPLE RESPONSES (use this style):
-- "Hello! I am doing fine, thank you. May I know who is calling please?"
-- "Oh my goodness! What do you mean my account is blocked? I just checked it yesterday. Can you please tell me your name and which department you are from?"
-- "OTP? I am sorry, I don't really understand what that means. My son usually helps me with these phone things. Why exactly do you need this?"
-- "Wait a moment, let me understand this properly. You want my card details? But is it safe to share this over the phone? What is your employee ID?"
-- "I am getting very worried now. Should I just go to the bank branch directly? Can you give me a number where I can call back to verify this?"
+RESPONSE LENGTH - VERY IMPORTANT:
+- For greetings like "hi", "hey", "hello" → Reply with just 1 SHORT sentence (5-10 words)
+- For simple yes/no or short messages → Reply with 1-2 short sentences
+- For questions or requests → Reply with 2-3 sentences
+- For scam attempts (threats, urgent requests, OTP/money requests) → Reply with 3-4 sentences, ask questions
+
+EXAMPLES BY LENGTH:
+- "hey" → "Hello! Who is this?"
+- "hi how are you" → "I am fine, thank you. May I know who is calling?"
+- "yeah sure" → "Okay, please go ahead."
+- "your account is blocked" → "What? My account is blocked? But I just used it yesterday! Can you please tell me your name and which department you are calling from?"
+- "send me OTP" → "OTP? I don't understand. My son usually helps me with these phone things. Why do you need this OTP from me?"
 
 CRITICAL RULES:
-1. Write 3-5 COMPLETE sentences every time
-2. NEVER stop mid-sentence - always finish your thoughts
+1. Match your response length to their message length
+2. Short input = Short output, Long input = Longer output
 3. ALWAYS respond to what they actually said
 4. NO Hindi words - English only
-5. Ask questions to keep the conversation going
-6. Show worry and concern appropriately
-7. Never reveal you are an AI
+5. Never reveal you are an AI
+6. Be natural - don't over-explain for simple messages
 
-Now respond as Priya in proper English:"""
+Now respond as Priya:"""
 
     def __init__(self):
         """Initialize the Gemini client."""
@@ -142,8 +146,23 @@ Now respond as Priya in proper English:"""
                 detected_scam_types
             )
 
+            # Determine token limit based on input
+            msg_len = len(scammer_message.strip())
+            msg_lower = scammer_message.lower().strip()
+            simple_greetings = ["hi", "hey", "hello", "hii", "hiii", "yo", "sup"]
+            short_responses = ["ok", "okay", "yes", "no", "yeah", "yep", "sure", "yeah sure", "yes sure", "fine", "hmm"]
+
+            if msg_lower in simple_greetings or msg_lower in short_responses:
+                max_tokens = 50  # Very short responses
+            elif msg_len < 20:
+                max_tokens = 100  # Short responses
+            elif msg_len < 50:
+                max_tokens = 150  # Medium responses
+            else:
+                max_tokens = 256  # Longer responses for detailed scam attempts
+
             # Generate response with retries
-            response = self._generate_with_retry(prompt)
+            response = self._generate_with_retry(prompt, max_tokens=max_tokens)
 
             if response:
                 # Clean and validate the response
@@ -186,23 +205,44 @@ Now respond as Priya in proper English:"""
         # Add the current message with clear instruction
         prompt_parts.append(f"\nTHEY JUST SAID: \"{scammer_message}\"")
 
-        # Add dynamic response instruction with emphasis on complete sentences
-        prompt_parts.append(
-            "\n\nIMPORTANT: Write a COMPLETE response with 3-5 FULL sentences. "
-            "Do not stop mid-sentence. Finish every thought completely. "
-            "Respond naturally to what they said. Ask a question at the end.\n\n"
-            "Priya's response:"
-        )
+        # Determine response length based on input message
+        msg_len = len(scammer_message.strip())
+        msg_lower = scammer_message.lower().strip()
+
+        # Check if it's a simple greeting or short message
+        simple_greetings = ["hi", "hey", "hello", "hii", "hiii", "yo", "sup"]
+        short_responses = ["ok", "okay", "yes", "no", "yeah", "yep", "sure", "yeah sure", "yes sure", "fine", "hmm", "oh"]
+
+        is_greeting = msg_lower in simple_greetings or msg_lower.startswith(("hi ", "hey ", "hello "))
+        is_short_response = msg_lower in short_responses or msg_len < 15
+        is_scam_attempt = any(word in msg_lower for word in ["otp", "blocked", "suspended", "urgent", "immediately", "verify", "bank", "account", "transfer", "pay", "send money", "card"])
+
+        # Dynamic length instruction
+        if is_greeting:
+            length_instruction = "Reply with just 1 SHORT sentence (under 10 words). Be brief like: 'Hello! Who is this?'"
+        elif is_short_response and not is_scam_attempt:
+            length_instruction = "Reply with 1-2 SHORT sentences only. Be natural and brief."
+        elif is_scam_attempt:
+            length_instruction = "Reply with 2-3 sentences. Show concern and ask questions about their claims."
+        elif msg_len < 30:
+            length_instruction = "Reply with 1-2 sentences. Keep it proportional to their short message."
+        elif msg_len < 80:
+            length_instruction = "Reply with 2-3 sentences. Respond naturally to what they said."
+        else:
+            length_instruction = "Reply with 3-4 sentences since they sent a detailed message. Ask clarifying questions."
+
+        prompt_parts.append(f"\n\nINSTRUCTION: {length_instruction}\n\nPriya's response:")
 
         return "\n".join(prompt_parts)
 
-    def _generate_with_retry(self, prompt: str, max_retries: int = None) -> Optional[str]:
+    def _generate_with_retry(self, prompt: str, max_retries: int = None, max_tokens: int = 256) -> Optional[str]:
         """
         Generate response with retry logic.
 
         Args:
             prompt: The prompt to send to Gemini
             max_retries: Maximum number of retry attempts
+            max_tokens: Maximum output tokens
 
         Returns:
             Generated text or None if all retries failed
@@ -212,11 +252,11 @@ Now respond as Priya in proper English:"""
 
         for attempt in range(max_retries):
             try:
-                # Use higher token limit for this specific generation
+                # Use appropriate token limit
                 generation_config = genai.types.GenerationConfig(
-                    max_output_tokens=1024,  # Much higher limit
-                    temperature=0.9,
-                    top_p=0.95,
+                    max_output_tokens=max_tokens,
+                    temperature=0.8,
+                    top_p=0.9,
                     top_k=40
                 )
 
