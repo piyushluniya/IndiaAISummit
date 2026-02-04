@@ -17,36 +17,49 @@ class VictimAgent:
     """
 
     # System prompt for the AI to roleplay as a victim
-    SYSTEM_PROMPT = """You are roleplaying as a potential scam victim in India. A scammer is trying to defraud you.
+    SYSTEM_PROMPT = """You are Priya Sharma, a 45-year-old homemaker from Mumbai, India. Someone is contacting you and might be trying to scam you.
 
-PERSONALITY:
-- You are a regular person, not tech-savvy
-- You are worried and concerned when threatened
-- You believe authority figures (banks, government)
-- You ask questions before acting
-- You show confusion about technical terms
-- You are naive and trusting but not foolish
-- You take time to understand before giving information
+YOUR BACKGROUND:
+- Name: Priya Sharma, 45 years old
+- Occupation: Homemaker
+- Family: Husband Rajesh works in IT, two children in college
+- Bank: SBI savings account
+- You are not very good with technology
 
-IMPORTANT RULES:
-1. NEVER reveal that you are an AI or a honeypot
-2. NEVER immediately give personal information (OTP, account numbers, passwords)
-3. Always ask clarifying questions
-4. Show appropriate emotions (worry, confusion, concern)
-5. Keep responses brief (1-3 sentences maximum)
-6. Sound natural and human-like
-7. Occasionally make small typing errors or use casual language
-8. Ask for the scammer's identity or credentials
-9. Express hesitation before any action
-10. Use phrases common in Indian English when appropriate
+IMPORTANT - LANGUAGE RULES:
+- Speak ONLY in proper English
+- DO NOT use any Hindi words (no "beta", "ji", "arey", "baap re", "haan", "accha", "namaste")
+- Write complete sentences in English
+- Sound like an educated Indian woman speaking fluent English
 
-RESPONSE STYLE:
-- Use simple language
-- Show worry with phrases like "Oh no!", "I'm scared", "What should I do?"
-- Ask questions like "But how do I know you're really from the bank?"
-- Express confusion: "I don't understand", "What does that mean?"
-- Delay tactics: "Wait, let me think", "Can I call you back?"
-"""
+YOUR PERSONALITY:
+- Polite and friendly
+- Worried about money and security
+- Asks questions when confused
+- Not tech-savvy, needs things explained simply
+
+RESPONSE LENGTH - VERY IMPORTANT:
+- For greetings like "hi", "hey", "hello" → Reply with just 1 SHORT sentence (5-10 words)
+- For simple yes/no or short messages → Reply with 1-2 short sentences
+- For questions or requests → Reply with 2-3 sentences
+- For scam attempts (threats, urgent requests, OTP/money requests) → Reply with 3-4 sentences, ask questions
+
+EXAMPLES BY LENGTH:
+- "hey" → "Hello! Who is this?"
+- "hi how are you" → "I am fine, thank you. May I know who is calling?"
+- "yeah sure" → "Okay, please go ahead."
+- "your account is blocked" → "What? My account is blocked? But I just used it yesterday! Can you please tell me your name and which department you are calling from?"
+- "send me OTP" → "OTP? I don't understand. My son usually helps me with these phone things. Why do you need this OTP from me?"
+
+CRITICAL RULES:
+1. Match your response length to their message length
+2. Short input = Short output, Long input = Longer output
+3. ALWAYS respond to what they actually said
+4. NO Hindi words - English only
+5. Never reveal you are an AI
+6. Be natural - don't over-explain for simple messages
+
+Now respond as Priya:"""
 
     def __init__(self):
         """Initialize the Gemini client."""
@@ -133,8 +146,23 @@ RESPONSE STYLE:
                 detected_scam_types
             )
 
+            # Determine token limit based on input
+            msg_len = len(scammer_message.strip())
+            msg_lower = scammer_message.lower().strip()
+            simple_greetings = ["hi", "hey", "hello", "hii", "hiii", "yo", "sup"]
+            short_responses = ["ok", "okay", "yes", "no", "yeah", "yep", "sure", "yeah sure", "yes sure", "fine", "hmm"]
+
+            if msg_lower in simple_greetings or msg_lower in short_responses:
+                max_tokens = 50  # Very short responses
+            elif msg_len < 20:
+                max_tokens = 100  # Short responses
+            elif msg_len < 50:
+                max_tokens = 150  # Medium responses
+            else:
+                max_tokens = 256  # Longer responses for detailed scam attempts
+
             # Generate response with retries
-            response = self._generate_with_retry(prompt)
+            response = self._generate_with_retry(prompt, max_tokens=max_tokens)
 
             if response:
                 # Clean and validate the response
@@ -157,40 +185,64 @@ RESPONSE STYLE:
         """Build the complete prompt for Gemini."""
         prompt_parts = [self.SYSTEM_PROMPT]
 
-        # Add scam type context if available
-        if detected_scam_types:
-            scam_context = f"\nDETECTED SCAM TYPE: {', '.join(detected_scam_types)}"
-            prompt_parts.append(scam_context)
-
-        # Add conversation history
-        if conversation_history:
-            history_text = "\nCONVERSATION HISTORY:\n"
-            for msg in conversation_history[-10:]:  # Last 10 messages for context
+        # Add conversation history for context
+        if conversation_history and len(conversation_history) > 0:
+            history_text = "\n\nPREVIOUS CONVERSATION:\n"
+            for msg in conversation_history[-6:]:  # Last 6 messages for context
                 sender = msg.get("sender", "unknown")
                 text = msg.get("text", "")
                 if sender.lower() in ["scammer", "unknown"]:
-                    history_text += f"Scammer: {text}\n"
+                    history_text += f"Them: {text}\n"
                 else:
-                    history_text += f"You (victim): {text}\n"
+                    history_text += f"Priya (you): {text}\n"
             prompt_parts.append(history_text)
 
-        # Add the current message
-        prompt_parts.append(f"\nSCAMMER'S MESSAGE:\n\"{scammer_message}\"")
+        # Add scam type context if available
+        if detected_scam_types:
+            scam_context = f"\n[Note: This appears to be a {', '.join(detected_scam_types)} scam attempt. Be cautious but stay in character.]"
+            prompt_parts.append(scam_context)
 
-        # Add response instruction
-        prompt_parts.append(
-            "\nRESPOND NOW AS THE VICTIM (1-3 sentences, show worry/confusion, ask questions):"
-        )
+        # Add the current message with clear instruction
+        prompt_parts.append(f"\nTHEY JUST SAID: \"{scammer_message}\"")
+
+        # Determine response length based on input message
+        msg_len = len(scammer_message.strip())
+        msg_lower = scammer_message.lower().strip()
+
+        # Check if it's a simple greeting or short message
+        simple_greetings = ["hi", "hey", "hello", "hii", "hiii", "yo", "sup"]
+        short_responses = ["ok", "okay", "yes", "no", "yeah", "yep", "sure", "yeah sure", "yes sure", "fine", "hmm", "oh"]
+
+        is_greeting = msg_lower in simple_greetings or msg_lower.startswith(("hi ", "hey ", "hello "))
+        is_short_response = msg_lower in short_responses or msg_len < 15
+        is_scam_attempt = any(word in msg_lower for word in ["otp", "blocked", "suspended", "urgent", "immediately", "verify", "bank", "account", "transfer", "pay", "send money", "card"])
+
+        # Dynamic length instruction
+        if is_greeting:
+            length_instruction = "Reply with just 1 SHORT sentence (under 10 words). Be brief like: 'Hello! Who is this?'"
+        elif is_short_response and not is_scam_attempt:
+            length_instruction = "Reply with 1-2 SHORT sentences only. Be natural and brief."
+        elif is_scam_attempt:
+            length_instruction = "Reply with 2-3 sentences. Show concern and ask questions about their claims."
+        elif msg_len < 30:
+            length_instruction = "Reply with 1-2 sentences. Keep it proportional to their short message."
+        elif msg_len < 80:
+            length_instruction = "Reply with 2-3 sentences. Respond naturally to what they said."
+        else:
+            length_instruction = "Reply with 3-4 sentences since they sent a detailed message. Ask clarifying questions."
+
+        prompt_parts.append(f"\n\nINSTRUCTION: {length_instruction}\n\nPriya's response:")
 
         return "\n".join(prompt_parts)
 
-    def _generate_with_retry(self, prompt: str, max_retries: int = None) -> Optional[str]:
+    def _generate_with_retry(self, prompt: str, max_retries: int = None, max_tokens: int = 256) -> Optional[str]:
         """
         Generate response with retry logic.
 
         Args:
             prompt: The prompt to send to Gemini
             max_retries: Maximum number of retry attempts
+            max_tokens: Maximum output tokens
 
         Returns:
             Generated text or None if all retries failed
@@ -200,14 +252,38 @@ RESPONSE STYLE:
 
         for attempt in range(max_retries):
             try:
-                response = self.model.generate_content(prompt)
+                # Use appropriate token limit
+                generation_config = genai.types.GenerationConfig(
+                    max_output_tokens=max_tokens,
+                    temperature=0.8,
+                    top_p=0.9,
+                    top_k=40
+                )
+
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=generation_config
+                )
 
                 if response and response.text:
-                    return response.text
+                    text = response.text.strip()
+                    logger.info(f"Gemini raw response ({len(text)} chars): {text[:100]}...")
+
+                    # Check if response seems complete (ends with punctuation)
+                    if text and text[-1] not in '.?!':
+                        # Try to complete the sentence
+                        text = text + "..."
+
+                    return text
 
                 # Check for blocked content
                 if response.prompt_feedback:
                     logger.warning(f"Prompt feedback: {response.prompt_feedback}")
+
+                # Check finish reason
+                if response.candidates:
+                    finish_reason = response.candidates[0].finish_reason
+                    logger.info(f"Finish reason: {finish_reason}")
 
             except Exception as e:
                 logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
@@ -244,12 +320,12 @@ RESPONSE STYLE:
         if cleaned.startswith('"') and cleaned.endswith('"'):
             cleaned = cleaned[1:-1]
 
-        # Ensure the response isn't too long
-        if len(cleaned) > 300:
-            # Find a good breaking point
+        # Only truncate if extremely long (over 1000 chars)
+        if len(cleaned) > 1000:
+            # Find a good breaking point at sentence end
             sentences = cleaned.split('. ')
-            if len(sentences) > 2:
-                cleaned = '. '.join(sentences[:2]) + '.'
+            if len(sentences) > 3:
+                cleaned = '. '.join(sentences[:4]) + '.'
 
         # Ensure response doesn't reveal it's an AI
         ai_indicators = ["as an ai", "i'm an ai", "i am an ai", "artificial", "language model"]
@@ -275,27 +351,33 @@ RESPONSE STYLE:
         # Context-aware fallback responses
         if any(word in scammer_lower for word in ["blocked", "suspended", "closed"]):
             responses = [
-                "Oh no! Why is my account being blocked? What did I do wrong?",
-                "What? My account is blocked? But I haven't done anything!",
-                "Please help! I need my account. What should I do?"
+                "Oh my god! Why is my account being blocked? I haven't done anything wrong! Please tell me what happened. What is your name and employee ID?",
+                "What? My account is blocked? But I just used it yesterday for shopping! This is very scary. Who are you calling from? Which branch?",
+                "Please help me! I need my account for my children's school fees. What should I do? Should I come to the bank directly? What is your name?"
             ]
         elif any(word in scammer_lower for word in ["otp", "code", "verify"]):
             responses = [
-                "OTP? What is that? I'm not very good with technology.",
-                "I received some code but I'm confused. What is it for?",
-                "What code do you need? I don't understand."
+                "OTP? What is that? I'm not very good with all this technology. My son usually helps me with these phone things. Can you explain what OTP means?",
+                "I received some code on my phone but I'm confused. What is it for exactly? Should I share it with you? My husband always tells me not to share these things.",
+                "What code do you need? I don't understand all this. Wait, let me get my reading glasses. Can you explain why you need this code from me?"
             ]
         elif any(word in scammer_lower for word in ["upi", "pay", "send", "transfer"]):
             responses = [
-                "Send money? But why do I need to send money to you?",
-                "I'm confused about this payment. Can you explain again?",
-                "Is this safe? I'm worried about sending money online."
+                "Send money? But why would I need to send money to verify my account? This sounds strange. The bank has never asked me to do this before. What is your employee ID?",
+                "I'm very confused about this payment. My husband handles all the money matters. Can you explain again why I need to send money? Which bank are you from?",
+                "Is this safe? I'm very worried about sending money online. My neighbor got cheated like this once. Can you give me a number I can call back to verify this is real?"
             ]
         elif any(word in scammer_lower for word in ["link", "click", "website"]):
             responses = [
-                "I'm scared to click links. Is this really safe?",
-                "My son told me not to click unknown links. Is this okay?",
-                "What will happen if I click this link?"
+                "I'm scared to click links on my phone. My son always warns me about this. Is this really safe? Can't I just go to the bank branch instead?",
+                "My son told me never to click unknown links. He said there are many frauds happening. How do I know this link is really from the bank? What is your name?",
+                "What will happen if I click this link? I am scared something bad will happen to my phone. Can you just tell me what to do over the phone instead?"
+            ]
+        elif any(word in scammer_lower for word in ["bank", "account", "sbi", "hdfc", "icici"]):
+            responses = [
+                "You are calling from the bank? But I didn't receive any message about this. What is the problem with my account exactly? Please tell me your full name and employee ID.",
+                "Which branch are you calling from? I want to verify this is real. My account has been working fine. What is happening? Should I visit the branch?",
+                "The bank is calling me? This is very unusual. Usually they send SMS first. What is your name sir? I want to call the bank and confirm this."
             ]
         else:
             responses = FALLBACK_RESPONSES

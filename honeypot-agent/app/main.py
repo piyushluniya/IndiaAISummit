@@ -8,9 +8,13 @@ from datetime import datetime
 from typing import List, Optional
 from contextlib import asynccontextmanager
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Header, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .config import logger, settings
@@ -76,6 +80,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files for web UI
+STATIC_DIR = Path(__file__).parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # Request timing middleware
@@ -151,6 +160,18 @@ async def health():
     return await health_check()
 
 
+@app.get("/ui", response_class=HTMLResponse, tags=["UI"])
+async def web_ui():
+    """
+    Serve the interactive web UI for testing the honeypot.
+    """
+    html_file = STATIC_DIR / "index.html"
+    if html_file.exists():
+        return HTMLResponse(content=html_file.read_text(), status_code=200)
+    else:
+        return HTMLResponse(content="<h1>UI not found</h1>", status_code=404)
+
+
 @app.post("/analyze", response_model=APIResponse, tags=["Analysis"])
 async def analyze_message(
     request: IncomingMessage,
@@ -221,27 +242,19 @@ async def analyze_message(
             scam_types=detection_result.scam_types
         )
 
-        # Generate appropriate response
-        if detection_result.is_scam:
-            # Extract intelligence from scammer's message
-            intelligence = extract_intelligence(message_text)
+        # Generate appropriate response - ALWAYS use AI for natural conversation
+        # Extract intelligence from message (even if not scam, for tracking)
+        intelligence = extract_intelligence(message_text)
+        update_session(session_id, intelligence=intelligence)
 
-            # Update session with extracted intelligence
-            update_session(session_id, intelligence=intelligence)
+        # Always generate AI victim response for natural conversation
+        reply = generate_response(
+            message_text,
+            history,
+            detection_result.scam_types if detection_result.is_scam else []
+        )
 
-            # Generate AI victim response
-            reply = generate_response(
-                message_text,
-                history,
-                detection_result.scam_types
-            )
-
-            logger.info(f"Generated victim response: {reply[:50]}...")
-
-        else:
-            # Not detected as scam - send generic polite response
-            reply = _get_generic_response(message_text)
-            logger.info("Message not detected as scam, sending generic response")
+        logger.info(f"Generated victim response: {reply[:50]}...")
 
         # Add our response to session
         update_session(
