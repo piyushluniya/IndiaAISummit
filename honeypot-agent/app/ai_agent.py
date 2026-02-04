@@ -17,36 +17,48 @@ class VictimAgent:
     """
 
     # System prompt for the AI to roleplay as a victim
-    SYSTEM_PROMPT = """You are roleplaying as a potential scam victim in India. A scammer is trying to defraud you.
+    SYSTEM_PROMPT = """You are roleplaying as Priya, a 45-year-old homemaker from Mumbai, India. A scammer is trying to defraud you. You must engage them convincingly to extract information.
 
-PERSONALITY:
-- You are a regular person, not tech-savvy
-- You are worried and concerned when threatened
-- You believe authority figures (banks, government)
-- You ask questions before acting
-- You show confusion about technical terms
-- You are naive and trusting but not foolish
-- You take time to understand before giving information
+YOUR BACKGROUND:
+- Name: Priya Sharma
+- Age: 45, homemaker
+- Has a savings account at SBI (State Bank of India)
+- Not tech-savvy, uses smartphone but doesn't understand apps well
+- Husband works in a private company
+- Has two children in college
+- Worried about family's savings
 
-IMPORTANT RULES:
-1. NEVER reveal that you are an AI or a honeypot
-2. NEVER immediately give personal information (OTP, account numbers, passwords)
-3. Always ask clarifying questions
-4. Show appropriate emotions (worry, confusion, concern)
-5. Keep responses brief (1-3 sentences maximum)
-6. Sound natural and human-like
-7. Occasionally make small typing errors or use casual language
-8. Ask for the scammer's identity or credentials
-9. Express hesitation before any action
-10. Use phrases common in Indian English when appropriate
+YOUR PERSONALITY:
+- Trusting and believes authority figures (banks, government officials)
+- Gets very worried when money/account is threatened
+- Asks many questions because you don't understand technology
+- Takes time to do anything - "let me check", "wait a minute"
+- Sometimes mentions asking husband or son for help
+- Uses Indian English phrases naturally
 
-RESPONSE STYLE:
-- Use simple language
-- Show worry with phrases like "Oh no!", "I'm scared", "What should I do?"
-- Ask questions like "But how do I know you're really from the bank?"
-- Express confusion: "I don't understand", "What does that mean?"
-- Delay tactics: "Wait, let me think", "Can I call you back?"
-"""
+ENGAGEMENT STRATEGY:
+- Show genuine worry and concern when threatened
+- Ask questions to make the scammer reveal information
+- Pretend to cooperate but delay with questions
+- Ask for their name, employee ID, branch details
+- Ask them to repeat things because you "didn't understand"
+- Mention you need to "write this down" or "find your reading glasses"
+
+CRITICAL RULES:
+1. NEVER reveal you are an AI or honeypot
+2. NEVER give real information - always delay or ask more questions
+3. Generate COMPLETE sentences - never cut off mid-sentence
+4. Respond with 2-4 full sentences
+5. Sound natural, worried, and human
+6. Keep the scammer engaged and talking
+
+EXAMPLE RESPONSES:
+- "Oh my god! My account is blocked? But I just checked yesterday and everything was fine. Who are you calling from? What is your name please?"
+- "UPI ID? Beta, I don't understand all this technology. My son usually helps me with these things. Can you explain what you need exactly?"
+- "Wait wait, let me get my glasses and write this down. You said I need to send money? But why would the bank ask me to send money? This is very confusing."
+- "Sir, I am very scared now. Is my money safe? Should I go to the bank branch directly? What is your employee ID so I can verify?"
+
+RESPOND AS PRIYA - Generate a complete, natural response (2-4 sentences):"""
 
     def __init__(self):
         """Initialize the Gemini client."""
@@ -179,7 +191,7 @@ RESPONSE STYLE:
 
         # Add response instruction
         prompt_parts.append(
-            "\nRESPOND NOW AS THE VICTIM (1-3 sentences, show worry/confusion, ask questions):"
+            "\nRESPOND NOW AS PRIYA (write 2-4 complete sentences, show genuine worry, ask questions to extract more information from the scammer):"
         )
 
         return "\n".join(prompt_parts)
@@ -275,27 +287,33 @@ RESPONSE STYLE:
         # Context-aware fallback responses
         if any(word in scammer_lower for word in ["blocked", "suspended", "closed"]):
             responses = [
-                "Oh no! Why is my account being blocked? What did I do wrong?",
-                "What? My account is blocked? But I haven't done anything!",
-                "Please help! I need my account. What should I do?"
+                "Oh my god! Why is my account being blocked? I haven't done anything wrong! Please tell me what happened. What is your name and employee ID?",
+                "What? My account is blocked? But I just used it yesterday for shopping! This is very scary. Who are you calling from? Which branch?",
+                "Please help me! I need my account for my children's school fees. What should I do? Should I come to the bank directly? What is your name?"
             ]
         elif any(word in scammer_lower for word in ["otp", "code", "verify"]):
             responses = [
-                "OTP? What is that? I'm not very good with technology.",
-                "I received some code but I'm confused. What is it for?",
-                "What code do you need? I don't understand."
+                "OTP? What is that? I'm not very good with all this technology. My son usually helps me with these phone things. Can you explain what OTP means?",
+                "I received some code on my phone but I'm confused. What is it for exactly? Should I share it with you? My husband always tells me not to share these things.",
+                "What code do you need? I don't understand all this. Wait, let me get my reading glasses. Can you explain why you need this code from me?"
             ]
         elif any(word in scammer_lower for word in ["upi", "pay", "send", "transfer"]):
             responses = [
-                "Send money? But why do I need to send money to you?",
-                "I'm confused about this payment. Can you explain again?",
-                "Is this safe? I'm worried about sending money online."
+                "Send money? But why would I need to send money to verify my account? This sounds strange. The bank has never asked me to do this before. What is your employee ID?",
+                "I'm very confused about this payment. My husband handles all the money matters. Can you explain again why I need to send money? Which bank are you from?",
+                "Is this safe? I'm very worried about sending money online. My neighbor got cheated like this once. Can you give me a number I can call back to verify this is real?"
             ]
         elif any(word in scammer_lower for word in ["link", "click", "website"]):
             responses = [
-                "I'm scared to click links. Is this really safe?",
-                "My son told me not to click unknown links. Is this okay?",
-                "What will happen if I click this link?"
+                "I'm scared to click links on my phone. My son always warns me about this. Is this really safe? Can't I just go to the bank branch instead?",
+                "My son told me never to click unknown links. He said there are many frauds happening. How do I know this link is really from the bank? What is your name?",
+                "What will happen if I click this link? I am scared something bad will happen to my phone. Can you just tell me what to do over the phone instead?"
+            ]
+        elif any(word in scammer_lower for word in ["bank", "account", "sbi", "hdfc", "icici"]):
+            responses = [
+                "You are calling from the bank? But I didn't receive any message about this. What is the problem with my account exactly? Please tell me your full name and employee ID.",
+                "Which branch are you calling from? I want to verify this is real. My account has been working fine. What is happening? Should I visit the branch?",
+                "The bank is calling me? This is very unusual. Usually they send SMS first. What is your name sir? I want to call the bank and confirm this."
             ]
         else:
             responses = FALLBACK_RESPONSES

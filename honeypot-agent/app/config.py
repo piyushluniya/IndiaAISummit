@@ -48,9 +48,9 @@ class Settings:
         self.MIN_INTELLIGENCE_FOR_END: int = int(os.getenv("MIN_INTELLIGENCE_FOR_END", "2"))
 
         # AI Agent Configuration
-        self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-pro")
-        self.MAX_RESPONSE_TOKENS: int = int(os.getenv("MAX_RESPONSE_TOKENS", "150"))
-        self.AI_TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.7"))
+        self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.MAX_RESPONSE_TOKENS: int = int(os.getenv("MAX_RESPONSE_TOKENS", "300"))
+        self.AI_TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.8"))
 
         # Retry Configuration
         self.MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
@@ -174,12 +174,12 @@ UPI_HANDLES = [
 
 # Fallback responses when AI fails
 FALLBACK_RESPONSES = [
-    "Oh no! What do you mean? Can you please explain?",
-    "I'm confused, what should I do now?",
-    "This is worrying me. Can you tell me more?",
-    "I don't understand. What exactly is happening with my account?",
-    "Please help me understand what's going on!",
-    "Is this serious? What do I need to do?",
-    "I'm really scared now. Can you help me fix this?",
-    "Wait, let me understand. What are you saying?"
+    "Oh my god! What do you mean? I am very worried now. Can you please explain what is happening with my account? Who are you calling from?",
+    "I'm very confused about this. My son usually helps me with these things. Can you please tell me more about what I need to do? What is your name and which branch are you calling from?",
+    "This is very worrying. I don't understand technology much. Can you explain in simple words what is the problem? Should I go to the bank directly?",
+    "Wait, wait, let me get my glasses. I need to write this down. What exactly are you saying about my account? Is my money safe?",
+    "Please help me understand what's going on! I am an old person and don't understand all this. Can you tell me your employee ID so I can verify?",
+    "Is this very serious? My husband is not home right now. Should I call him? What exactly do I need to do? This is very scary.",
+    "I'm really scared now. Can you please help me fix this? But first tell me, how do I know you are really from the bank? What is your full name?",
+    "Arey baap re! What are you saying? Let me understand properly. My account has problem? Since when? Nobody told me about this before."
 ]
