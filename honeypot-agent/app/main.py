@@ -242,27 +242,19 @@ async def analyze_message(
             scam_types=detection_result.scam_types
         )
 
-        # Generate appropriate response
-        if detection_result.is_scam:
-            # Extract intelligence from scammer's message
-            intelligence = extract_intelligence(message_text)
+        # Generate appropriate response - ALWAYS use AI for natural conversation
+        # Extract intelligence from message (even if not scam, for tracking)
+        intelligence = extract_intelligence(message_text)
+        update_session(session_id, intelligence=intelligence)
 
-            # Update session with extracted intelligence
-            update_session(session_id, intelligence=intelligence)
+        # Always generate AI victim response for natural conversation
+        reply = generate_response(
+            message_text,
+            history,
+            detection_result.scam_types if detection_result.is_scam else []
+        )
 
-            # Generate AI victim response
-            reply = generate_response(
-                message_text,
-                history,
-                detection_result.scam_types
-            )
-
-            logger.info(f"Generated victim response: {reply[:50]}...")
-
-        else:
-            # Not detected as scam - send generic polite response
-            reply = _get_generic_response(message_text)
-            logger.info("Message not detected as scam, sending generic response")
+        logger.info(f"Generated victim response: {reply[:50]}...")
 
         # Add our response to session
         update_session(
