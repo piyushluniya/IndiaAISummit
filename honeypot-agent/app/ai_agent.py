@@ -186,12 +186,12 @@ Now respond as Priya in proper English:"""
         # Add the current message with clear instruction
         prompt_parts.append(f"\nTHEY JUST SAID: \"{scammer_message}\"")
 
-        # Add dynamic response instruction
+        # Add dynamic response instruction with emphasis on complete sentences
         prompt_parts.append(
-            "\nAs Priya, respond naturally to what they just said. "
-            "Read their message carefully and reply appropriately. "
-            "Be conversational, ask questions, show your personality. "
-            "Write 2-4 complete sentences:"
+            "\n\nIMPORTANT: Write a COMPLETE response with 3-5 FULL sentences. "
+            "Do not stop mid-sentence. Finish every thought completely. "
+            "Respond naturally to what they said. Ask a question at the end.\n\n"
+            "Priya's response:"
         )
 
         return "\n".join(prompt_parts)
@@ -212,14 +212,38 @@ Now respond as Priya in proper English:"""
 
         for attempt in range(max_retries):
             try:
-                response = self.model.generate_content(prompt)
+                # Use higher token limit for this specific generation
+                generation_config = genai.types.GenerationConfig(
+                    max_output_tokens=1024,  # Much higher limit
+                    temperature=0.9,
+                    top_p=0.95,
+                    top_k=40
+                )
+
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=generation_config
+                )
 
                 if response and response.text:
-                    return response.text
+                    text = response.text.strip()
+                    logger.info(f"Gemini raw response ({len(text)} chars): {text[:100]}...")
+
+                    # Check if response seems complete (ends with punctuation)
+                    if text and text[-1] not in '.?!':
+                        # Try to complete the sentence
+                        text = text + "..."
+
+                    return text
 
                 # Check for blocked content
                 if response.prompt_feedback:
                     logger.warning(f"Prompt feedback: {response.prompt_feedback}")
+
+                # Check finish reason
+                if response.candidates:
+                    finish_reason = response.candidates[0].finish_reason
+                    logger.info(f"Finish reason: {finish_reason}")
 
             except Exception as e:
                 logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
