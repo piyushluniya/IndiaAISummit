@@ -27,9 +27,10 @@ class IntelligenceExtractor:
             r'\+(?!91)(\d{1,3})[-\s]?(\d{7,14})',
             re.IGNORECASE
         ),
-        # UPI IDs: username@handle format
+        # UPI IDs: India-specific format (username@handle)
+        # Matches: scammer@upi, raj.paytm@ybl, john123@okaxis
         "upi_id": re.compile(
-            r'\b([a-zA-Z0-9][a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,})\b',
+            r'\b([a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64})\b',
             re.IGNORECASE
         ),
         # Bank account numbers (9-18 digits)

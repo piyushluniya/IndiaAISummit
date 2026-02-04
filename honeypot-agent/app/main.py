@@ -26,7 +26,7 @@ from .models import (
     SessionSummary,
     SessionData
 )
-from .scam_detector import detect_scam, scam_detector
+from .scam_detector import detect_scam, should_activate_agent, hybrid_detector
 from .ai_agent import generate_response, generate_notes, victim_agent
 from .intelligence_extractor import extract_intelligence
 from .session_manager import (
@@ -226,33 +226,46 @@ async def analyze_message(
         # Add current session history
         history.extend(session.conversationHistory)
 
-        # Detect if message is a scam
-        detection_result = detect_scam(message_text, history)
+        # Detect if message is a scam using hybrid ML + Regex + LLM detection
+        detection_result = detect_scam(message_text, history, session_id)
 
         logger.info(
-            f"Scam detection: is_scam={detection_result.is_scam}, "
+            f"Hybrid detection: is_scam={detection_result.is_scam}, "
             f"confidence={detection_result.confidence:.2f}, "
             f"types={detection_result.scam_types}"
         )
 
-        # Update session with scam detection
-        update_session(
-            session_id,
-            scam_detected=detection_result.is_scam,
-            scam_types=detection_result.scam_types
-        )
-
-        # Generate appropriate response - ALWAYS use AI for natural conversation
-        # Extract intelligence from message (even if not scam, for tracking)
+        # Extract intelligence from message
         intelligence = extract_intelligence(message_text)
         update_session(session_id, intelligence=intelligence)
 
-        # Always generate AI victim response for natural conversation
-        reply = generate_response(
-            message_text,
-            history,
-            detection_result.scam_types if detection_result.is_scam else []
+        # Check if we should activate the AI agent based on escalation rules:
+        # - Condition A: scam confidence > 0.75
+        # - Condition B: 2+ suspicious turns in a row
+        # - Condition C: UPI / link / phone detected
+        intel_dict = intelligence.to_dict()
+        activate_agent = should_activate_agent(detection_result, session_id, intel_dict)
+
+        logger.info(f"Agent activation: {activate_agent}")
+
+        # Update session with scam detection
+        update_session(
+            session_id,
+            scam_detected=detection_result.is_scam or activate_agent,
+            scam_types=detection_result.scam_types
         )
+
+        # Generate response based on activation decision
+        if activate_agent:
+            # Use AI agent for engaged conversation to extract more intelligence
+            reply = generate_response(
+                message_text,
+                history,
+                detection_result.scam_types
+            )
+        else:
+            # Use simple response for non-threatening messages (reduces false positives)
+            reply = _get_simple_response(message_text)
 
         logger.info(f"Generated victim response: {reply[:50]}...")
 
@@ -439,9 +452,11 @@ async def test_scam_detection(
 ):
     """
     Test endpoint to check scam detection for a message.
+    Uses hybrid ML + Regex + LLM detection.
     """
     result = detect_scam(message)
-    keywords = scam_detector.get_detected_keywords(message)
+    intelligence = extract_intelligence(message)
+    activate = should_activate_agent(result, extracted_intel=intelligence.to_dict())
 
     return {
         "message": message,
@@ -450,7 +465,8 @@ async def test_scam_detection(
         "risk_score": result.risk_score,
         "detected_patterns": result.detected_patterns,
         "scam_types": result.scam_types,
-        "keywords_found": keywords
+        "agent_activated": activate,
+        "extracted_intelligence": intelligence.to_dict()
     }
 
 
@@ -502,9 +518,56 @@ async def test_callback_connection(api_key: str = Depends(verify_api_key)):
 # Helper Functions
 # ============================================================================
 
+def _get_simple_response(message: str) -> str:
+    """
+    Generate a simple response for non-threatening messages.
+    Used when agent activation is not triggered to reduce false positives.
+
+    Args:
+        message: The incoming message
+
+    Returns:
+        Simple, natural response string
+    """
+    import random
+    message_lower = message.lower().strip()
+
+    # Greeting responses
+    if any(word in message_lower for word in ["hello", "hi", "hey", "hii"]):
+        return random.choice([
+            "Hello, who is this?",
+            "Hi, may I know who is calling?",
+            "Hello! Who is this please?"
+        ])
+
+    # Yes/No/Ok responses
+    if message_lower in ["ok", "okay", "yes", "no", "sure", "fine", "yeah"]:
+        return random.choice([
+            "Okay, please continue.",
+            "Alright, go ahead.",
+            "Yes, tell me more."
+        ])
+
+    # Question responses
+    if "?" in message:
+        return random.choice([
+            "I am not sure. Can you explain?",
+            "What do you mean exactly?",
+            "Could you tell me more?"
+        ])
+
+    # Default response - ask for clarification
+    return random.choice([
+        "I see. What is this about?",
+        "Okay. Can you explain more?",
+        "I understand. Please go on."
+    ])
+
+
 def _get_generic_response(message: str) -> str:
     """
     Generate a generic polite response for non-scam messages.
+    (Kept for backwards compatibility)
 
     Args:
         message: The incoming message
@@ -512,18 +575,7 @@ def _get_generic_response(message: str) -> str:
     Returns:
         Generic response string
     """
-    message_lower = message.lower()
-
-    # Greeting responses
-    if any(word in message_lower for word in ["hello", "hi", "hey", "good morning", "good evening"]):
-        return "Hello! How can I help you today?"
-
-    # Question responses
-    if "?" in message:
-        return "I'm not sure I understand. Could you please explain more?"
-
-    # Default response
-    return "Thank you for your message. Is there something specific you need help with?"
+    return _get_simple_response(message)
 
 
 # ============================================================================
