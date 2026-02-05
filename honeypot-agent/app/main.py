@@ -214,9 +214,13 @@ async def analyze_message(
         APIResponse with status and AI-generated reply
     """
     try:
-        session_id = request.sessionId
-        message_text = request.message.text
-        sender = request.message.sender
+        # Use flexible getter methods to handle different request formats
+        session_id = request.get_session_id()
+        message_text = request.get_message_text()
+        sender = request.get_sender()
+
+        if not message_text:
+            raise HTTPException(status_code=400, detail="No message text provided")
 
         logger.info(f"Processing message for session {session_id}: {message_text[:50]}...")
 
@@ -227,12 +231,18 @@ async def analyze_message(
         )
 
         # Add scammer's message to session history
+        timestamp = datetime.utcnow().isoformat()
+        if hasattr(request.message, 'timestamp') and request.message.timestamp:
+            timestamp = request.message.timestamp
+        elif isinstance(request.message, dict) and request.message.get('timestamp'):
+            timestamp = request.message.get('timestamp')
+
         update_session(
             session_id,
             message={
                 "sender": sender,
                 "text": message_text,
-                "timestamp": request.message.timestamp or datetime.utcnow().isoformat()
+                "timestamp": timestamp
             }
         )
 

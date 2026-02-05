@@ -58,8 +58,8 @@ class Metadata(BaseModel):
 
 class IncomingMessage(BaseModel):
     """Schema for incoming API request from GUVI platform."""
-    sessionId: str = Field(..., description="Unique session identifier")
-    message: MessageData = Field(..., description="Current message from scammer")
+    sessionId: Optional[str] = Field(None, description="Unique session identifier")
+    message: Optional[Any] = Field(None, description="Current message - can be string or MessageData object")
     conversationHistory: Optional[List[MessageData]] = Field(
         default_factory=list,
         description="Previous messages in conversation"
@@ -68,6 +68,39 @@ class IncomingMessage(BaseModel):
         default_factory=Metadata,
         description="Additional metadata"
     )
+    # Alternative field names GUVI might use
+    session_id: Optional[str] = Field(None, description="Alternative session ID field")
+    text: Optional[str] = Field(None, description="Direct text field")
+    msg: Optional[str] = Field(None, description="Alternative message field")
+
+    def get_session_id(self) -> str:
+        """Get session ID from various possible field names."""
+        return self.sessionId or self.session_id or "default-session"
+
+    def get_message_text(self) -> str:
+        """Get message text from various possible formats."""
+        # If message is a string directly
+        if isinstance(self.message, str):
+            return self.message
+        # If message is a dict/MessageData object
+        if isinstance(self.message, dict):
+            return self.message.get("text", self.message.get("content", ""))
+        if hasattr(self.message, "text"):
+            return self.message.text
+        # Try alternative fields
+        if self.text:
+            return self.text
+        if self.msg:
+            return self.msg
+        return ""
+
+    def get_sender(self) -> str:
+        """Get sender from message."""
+        if isinstance(self.message, dict):
+            return self.message.get("sender", "scammer")
+        if hasattr(self.message, "sender"):
+            return self.message.sender
+        return "scammer"
 
     class Config:
         json_schema_extra = {
