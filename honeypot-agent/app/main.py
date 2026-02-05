@@ -154,6 +154,18 @@ async def health_check():
     )
 
 
+@app.post("/", response_model=APIResponse, tags=["Analysis"])
+async def analyze_message_root(
+    request: IncomingMessage,
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    Main endpoint for analyzing scammer messages (root path).
+    Alias for /analyze endpoint - GUVI sends requests here.
+    """
+    return await analyze_message(request, api_key)
+
+
 @app.get("/health", response_model=HealthCheckResponse, tags=["Health"])
 async def health():
     """Alias for health check endpoint."""
