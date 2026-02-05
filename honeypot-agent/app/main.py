@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Header, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -158,6 +158,16 @@ async def health_check():
 async def health():
     """Alias for health check endpoint."""
     return await health_check()
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Serve favicon."""
+    favicon_path = STATIC_DIR / "favicon.ico"
+    if favicon_path.exists():
+        return FileResponse(favicon_path)
+    # Return empty response if no favicon
+    return FileResponse(favicon_path) if favicon_path.exists() else JSONResponse(content={}, status_code=204)
 
 
 @app.get("/ui", response_class=HTMLResponse, tags=["UI"])
