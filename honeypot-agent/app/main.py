@@ -283,17 +283,14 @@ async def analyze_message(
             scam_types=detection_result.scam_types
         )
 
-        # Generate response based on activation decision
-        if activate_agent:
-            # Use AI agent for engaged conversation to extract more intelligence
-            reply = generate_response(
-                message_text,
-                history,
-                detection_result.scam_types
-            )
-        else:
-            # Use simple response for non-threatening messages (reduces false positives)
-            reply = _get_simple_response(message_text)
+        # ALWAYS use Gemini AI for natural conversation
+        # The escalation rules only determine if we mark it as "scam"
+        # But we always want realistic AI responses for good engagement
+        reply = generate_response(
+            message_text,
+            history,
+            detection_result.scam_types if (detection_result.is_scam or activate_agent) else []
+        )
 
         logger.info(f"Generated victim response: {reply[:50]}...")
 
