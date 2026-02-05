@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Header, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -26,7 +26,7 @@ from .models import (
     SessionSummary,
     SessionData
 )
-from .scam_detector import detect_scam, scam_detector
+from .scam_detector import detect_scam, should_activate_agent, hybrid_detector
 from .ai_agent import generate_response, generate_notes, victim_agent
 from .intelligence_extractor import extract_intelligence
 from .session_manager import (
@@ -154,10 +154,32 @@ async def health_check():
     )
 
 
+@app.post("/", response_model=APIResponse, tags=["Analysis"])
+async def analyze_message_root(
+    request: IncomingMessage,
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    Main endpoint for analyzing scammer messages (root path).
+    Alias for /analyze endpoint - GUVI sends requests here.
+    """
+    return await analyze_message(request, api_key)
+
+
 @app.get("/health", response_model=HealthCheckResponse, tags=["Health"])
 async def health():
     """Alias for health check endpoint."""
     return await health_check()
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Serve favicon."""
+    favicon_path = STATIC_DIR / "favicon.ico"
+    if favicon_path.exists():
+        return FileResponse(favicon_path)
+    # Return empty response if no favicon
+    return FileResponse(favicon_path) if favicon_path.exists() else JSONResponse(content={}, status_code=204)
 
 
 @app.get("/ui", response_class=HTMLResponse, tags=["UI"])
@@ -192,9 +214,13 @@ async def analyze_message(
         APIResponse with status and AI-generated reply
     """
     try:
-        session_id = request.sessionId
-        message_text = request.message.text
-        sender = request.message.sender
+        # Use flexible getter methods to handle different request formats
+        session_id = request.get_session_id()
+        message_text = request.get_message_text()
+        sender = request.get_sender()
+
+        if not message_text:
+            raise HTTPException(status_code=400, detail="No message text provided")
 
         logger.info(f"Processing message for session {session_id}: {message_text[:50]}...")
 
@@ -205,12 +231,14 @@ async def analyze_message(
         )
 
         # Add scammer's message to session history
+        timestamp = request.get_timestamp()
+
         update_session(
             session_id,
             message={
                 "sender": sender,
                 "text": message_text,
-                "timestamp": request.message.timestamp or datetime.utcnow().isoformat()
+                "timestamp": timestamp
             }
         )
 
@@ -226,32 +254,42 @@ async def analyze_message(
         # Add current session history
         history.extend(session.conversationHistory)
 
-        # Detect if message is a scam
-        detection_result = detect_scam(message_text, history)
+        # Detect if message is a scam using hybrid ML + Regex + LLM detection
+        detection_result = detect_scam(message_text, history, session_id)
 
         logger.info(
-            f"Scam detection: is_scam={detection_result.is_scam}, "
+            f"Hybrid detection: is_scam={detection_result.is_scam}, "
             f"confidence={detection_result.confidence:.2f}, "
             f"types={detection_result.scam_types}"
         )
 
-        # Update session with scam detection
-        update_session(
-            session_id,
-            scam_detected=detection_result.is_scam,
-            scam_types=detection_result.scam_types
-        )
-
-        # Generate appropriate response - ALWAYS use AI for natural conversation
-        # Extract intelligence from message (even if not scam, for tracking)
+        # Extract intelligence from message
         intelligence = extract_intelligence(message_text)
         update_session(session_id, intelligence=intelligence)
 
-        # Always generate AI victim response for natural conversation
+        # Check if we should activate the AI agent based on escalation rules:
+        # - Condition A: scam confidence > 0.75
+        # - Condition B: 2+ suspicious turns in a row
+        # - Condition C: UPI / link / phone detected
+        intel_dict = intelligence.to_dict()
+        activate_agent = should_activate_agent(detection_result, session_id, intel_dict)
+
+        logger.info(f"Agent activation: {activate_agent}")
+
+        # Update session with scam detection
+        update_session(
+            session_id,
+            scam_detected=detection_result.is_scam or activate_agent,
+            scam_types=detection_result.scam_types
+        )
+
+        # ALWAYS use Gemini AI for natural conversation
+        # The escalation rules only determine if we mark it as "scam"
+        # But we always want realistic AI responses for good engagement
         reply = generate_response(
             message_text,
             history,
-            detection_result.scam_types if detection_result.is_scam else []
+            detection_result.scam_types if (detection_result.is_scam or activate_agent) else []
         )
 
         logger.info(f"Generated victim response: {reply[:50]}...")
@@ -439,9 +477,11 @@ async def test_scam_detection(
 ):
     """
     Test endpoint to check scam detection for a message.
+    Uses hybrid ML + Regex + LLM detection.
     """
     result = detect_scam(message)
-    keywords = scam_detector.get_detected_keywords(message)
+    intelligence = extract_intelligence(message)
+    activate = should_activate_agent(result, extracted_intel=intelligence.to_dict())
 
     return {
         "message": message,
@@ -450,7 +490,8 @@ async def test_scam_detection(
         "risk_score": result.risk_score,
         "detected_patterns": result.detected_patterns,
         "scam_types": result.scam_types,
-        "keywords_found": keywords
+        "agent_activated": activate,
+        "extracted_intelligence": intelligence.to_dict()
     }
 
 
@@ -502,9 +543,56 @@ async def test_callback_connection(api_key: str = Depends(verify_api_key)):
 # Helper Functions
 # ============================================================================
 
+def _get_simple_response(message: str) -> str:
+    """
+    Generate a simple response for non-threatening messages.
+    Used when agent activation is not triggered to reduce false positives.
+
+    Args:
+        message: The incoming message
+
+    Returns:
+        Simple, natural response string
+    """
+    import random
+    message_lower = message.lower().strip()
+
+    # Greeting responses
+    if any(word in message_lower for word in ["hello", "hi", "hey", "hii"]):
+        return random.choice([
+            "Hello, who is this?",
+            "Hi, may I know who is calling?",
+            "Hello! Who is this please?"
+        ])
+
+    # Yes/No/Ok responses
+    if message_lower in ["ok", "okay", "yes", "no", "sure", "fine", "yeah"]:
+        return random.choice([
+            "Okay, please continue.",
+            "Alright, go ahead.",
+            "Yes, tell me more."
+        ])
+
+    # Question responses
+    if "?" in message:
+        return random.choice([
+            "I am not sure. Can you explain?",
+            "What do you mean exactly?",
+            "Could you tell me more?"
+        ])
+
+    # Default response - ask for clarification
+    return random.choice([
+        "I see. What is this about?",
+        "Okay. Can you explain more?",
+        "I understand. Please go on."
+    ])
+
+
 def _get_generic_response(message: str) -> str:
     """
     Generate a generic polite response for non-scam messages.
+    (Kept for backwards compatibility)
 
     Args:
         message: The incoming message
@@ -512,18 +600,7 @@ def _get_generic_response(message: str) -> str:
     Returns:
         Generic response string
     """
-    message_lower = message.lower()
-
-    # Greeting responses
-    if any(word in message_lower for word in ["hello", "hi", "hey", "good morning", "good evening"]):
-        return "Hello! How can I help you today?"
-
-    # Question responses
-    if "?" in message:
-        return "I'm not sure I understand. Could you please explain more?"
-
-    # Default response
-    return "Thank you for your message. Is there something specific you need help with?"
+    return _get_simple_response(message)
 
 
 # ============================================================================

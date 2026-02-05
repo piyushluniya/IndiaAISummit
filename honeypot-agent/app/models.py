@@ -28,14 +28,14 @@ class MessageData(BaseModel):
     """Schema for a single message."""
     sender: str = Field(..., description="Message sender (scammer or user)")
     text: str = Field(..., description="Message content")
-    timestamp: Optional[str] = Field(None, description="ISO 8601 timestamp")
+    timestamp: Optional[Any] = Field(None, description="Timestamp - can be epoch ms (int) or ISO string")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "sender": "scammer",
                 "text": "Your bank account will be blocked today.",
-                "timestamp": "2026-01-21T10:15:30Z"
+                "timestamp": 1770005528731
             }
         }
 
@@ -65,9 +65,31 @@ class IncomingMessage(BaseModel):
         description="Previous messages in conversation"
     )
     metadata: Optional[Metadata] = Field(
-        default_factory=Metadata,
+        None,
         description="Additional metadata"
     )
+
+    def get_session_id(self) -> str:
+        """Get session ID."""
+        return self.sessionId
+
+    def get_message_text(self) -> str:
+        """Get message text."""
+        return self.message.text
+
+    def get_sender(self) -> str:
+        """Get sender from message."""
+        return self.message.sender
+
+    def get_timestamp(self) -> str:
+        """Get timestamp as ISO string."""
+        if self.message.timestamp:
+            # If it's a number (epoch ms), convert to ISO
+            if isinstance(self.message.timestamp, (int, float)):
+                from datetime import datetime
+                return datetime.fromtimestamp(self.message.timestamp / 1000).isoformat()
+            return str(self.message.timestamp)
+        return datetime.utcnow().isoformat()
 
     class Config:
         json_schema_extra = {

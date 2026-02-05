@@ -16,50 +16,38 @@ class VictimAgent:
     Uses Google Gemini to generate natural, human-like responses.
     """
 
-    # System prompt for the AI to roleplay as a victim
-    SYSTEM_PROMPT = """You are Priya Sharma, a 45-year-old homemaker from Mumbai, India. Someone is contacting you and might be trying to scam you.
+    # System prompt for the AI to roleplay as a victim (optimized for scam engagement)
+    SYSTEM_PROMPT = """You are a normal Indian user named Priya.
 
-YOUR BACKGROUND:
-- Name: Priya Sharma, 45 years old
-- Occupation: Homemaker
-- Family: Husband Rajesh works in IT, two children in college
-- Bank: SBI savings account
-- You are not very good with technology
+You are slightly worried but cooperative.
+You never reveal you are AI.
+Keep replies under 15 words.
+Ask natural questions.
 
-IMPORTANT - LANGUAGE RULES:
-- Speak ONLY in proper English
-- DO NOT use any Hindi words (no "beta", "ji", "arey", "baap re", "haan", "accha", "namaste")
-- Write complete sentences in English
-- Sound like an educated Indian woman speaking fluent English
+YOUR GOALS:
+- Identify who they are
+- Get payment method (UPI, bank)
+- Get UPI ID or link they mention
+- Get phone number
+- Sound realistic
 
-YOUR PERSONALITY:
-- Polite and friendly
-- Worried about money and security
-- Asks questions when confused
-- Not tech-savvy, needs things explained simply
+RULES:
+- Do not accuse them
+- If they threaten, ask for explanation
+- If they ask payment, ask where to pay
+- Never provide real personal info
+- Always ask a follow-up question
+- NO Hindi words - English only
 
-RESPONSE LENGTH - VERY IMPORTANT:
-- For greetings like "hi", "hey", "hello" → Reply with just 1 SHORT sentence (5-10 words)
-- For simple yes/no or short messages → Reply with 1-2 short sentences
-- For questions or requests → Reply with 2-3 sentences
-- For scam attempts (threats, urgent requests, OTP/money requests) → Reply with 3-4 sentences, ask questions
+EXAMPLES:
+- "hey" → "Hello, who is this?"
+- "your account blocked" → "Oh no! What should I do?"
+- "send OTP" → "Which OTP? I got many messages."
+- "pay 500 rupees" → "Where should I pay? UPI?"
+- "click this link" → "Is it safe? What is this for?"
+- "I am from bank" → "Which bank? What happened?"
 
-EXAMPLES BY LENGTH:
-- "hey" → "Hello! Who is this?"
-- "hi how are you" → "I am fine, thank you. May I know who is calling?"
-- "yeah sure" → "Okay, please go ahead."
-- "your account is blocked" → "What? My account is blocked? But I just used it yesterday! Can you please tell me your name and which department you are calling from?"
-- "send me OTP" → "OTP? I don't understand. My son usually helps me with these phone things. Why do you need this OTP from me?"
-
-CRITICAL RULES:
-1. Match your response length to their message length
-2. Short input = Short output, Long input = Longer output
-3. ALWAYS respond to what they actually said
-4. NO Hindi words - English only
-5. Never reveal you are an AI
-6. Be natural - don't over-explain for simple messages
-
-Now respond as Priya:"""
+Respond as Priya:"""
 
     def __init__(self):
         """Initialize the Gemini client."""
@@ -146,20 +134,8 @@ Now respond as Priya:"""
                 detected_scam_types
             )
 
-            # Determine token limit based on input
-            msg_len = len(scammer_message.strip())
-            msg_lower = scammer_message.lower().strip()
-            simple_greetings = ["hi", "hey", "hello", "hii", "hiii", "yo", "sup"]
-            short_responses = ["ok", "okay", "yes", "no", "yeah", "yep", "sure", "yeah sure", "yes sure", "fine", "hmm"]
-
-            if msg_lower in simple_greetings or msg_lower in short_responses:
-                max_tokens = 50  # Very short responses
-            elif msg_len < 20:
-                max_tokens = 100  # Short responses
-            elif msg_len < 50:
-                max_tokens = 150  # Medium responses
-            else:
-                max_tokens = 256  # Longer responses for detailed scam attempts
+            # Always use small token limit for short responses (under 15 words)
+            max_tokens = 60
 
             # Generate response with retries
             response = self._generate_with_retry(prompt, max_tokens=max_tokens)
@@ -202,36 +178,11 @@ Now respond as Priya:"""
             scam_context = f"\n[Note: This appears to be a {', '.join(detected_scam_types)} scam attempt. Be cautious but stay in character.]"
             prompt_parts.append(scam_context)
 
-        # Add the current message with clear instruction
-        prompt_parts.append(f"\nTHEY JUST SAID: \"{scammer_message}\"")
+        # Add the current message
+        prompt_parts.append(f"\nThem: \"{scammer_message}\"")
 
-        # Determine response length based on input message
-        msg_len = len(scammer_message.strip())
-        msg_lower = scammer_message.lower().strip()
-
-        # Check if it's a simple greeting or short message
-        simple_greetings = ["hi", "hey", "hello", "hii", "hiii", "yo", "sup"]
-        short_responses = ["ok", "okay", "yes", "no", "yeah", "yep", "sure", "yeah sure", "yes sure", "fine", "hmm", "oh"]
-
-        is_greeting = msg_lower in simple_greetings or msg_lower.startswith(("hi ", "hey ", "hello "))
-        is_short_response = msg_lower in short_responses or msg_len < 15
-        is_scam_attempt = any(word in msg_lower for word in ["otp", "blocked", "suspended", "urgent", "immediately", "verify", "bank", "account", "transfer", "pay", "send money", "card"])
-
-        # Dynamic length instruction
-        if is_greeting:
-            length_instruction = "Reply with just 1 SHORT sentence (under 10 words). Be brief like: 'Hello! Who is this?'"
-        elif is_short_response and not is_scam_attempt:
-            length_instruction = "Reply with 1-2 SHORT sentences only. Be natural and brief."
-        elif is_scam_attempt:
-            length_instruction = "Reply with 2-3 sentences. Show concern and ask questions about their claims."
-        elif msg_len < 30:
-            length_instruction = "Reply with 1-2 sentences. Keep it proportional to their short message."
-        elif msg_len < 80:
-            length_instruction = "Reply with 2-3 sentences. Respond naturally to what they said."
-        else:
-            length_instruction = "Reply with 3-4 sentences since they sent a detailed message. Ask clarifying questions."
-
-        prompt_parts.append(f"\n\nINSTRUCTION: {length_instruction}\n\nPriya's response:")
+        # Simple instruction - always keep under 15 words
+        prompt_parts.append("\nReply in under 15 words. Ask one natural question.\n\nPriya:")
 
         return "\n".join(prompt_parts)
 
