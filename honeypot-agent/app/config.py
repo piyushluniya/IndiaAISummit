@@ -48,7 +48,7 @@ class Settings:
         self.MIN_INTELLIGENCE_FOR_END: int = int(os.getenv("MIN_INTELLIGENCE_FOR_END", "2"))
 
         # AI Agent Configuration
-        self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
         self.MAX_RESPONSE_TOKENS: int = int(os.getenv("MAX_RESPONSE_TOKENS", "500"))
         self.AI_TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.9"))
 
