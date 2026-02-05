@@ -231,11 +231,7 @@ async def analyze_message(
         )
 
         # Add scammer's message to session history
-        timestamp = datetime.utcnow().isoformat()
-        if hasattr(request.message, 'timestamp') and request.message.timestamp:
-            timestamp = request.message.timestamp
-        elif isinstance(request.message, dict) and request.message.get('timestamp'):
-            timestamp = request.message.get('timestamp')
+        timestamp = request.get_timestamp()
 
         update_session(
             session_id,

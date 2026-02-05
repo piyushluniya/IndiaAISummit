@@ -28,14 +28,14 @@ class MessageData(BaseModel):
     """Schema for a single message."""
     sender: str = Field(..., description="Message sender (scammer or user)")
     text: str = Field(..., description="Message content")
-    timestamp: Optional[str] = Field(None, description="ISO 8601 timestamp")
+    timestamp: Optional[Any] = Field(None, description="Timestamp - can be epoch ms (int) or ISO string")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "sender": "scammer",
                 "text": "Your bank account will be blocked today.",
-                "timestamp": "2026-01-21T10:15:30Z"
+                "timestamp": 1770005528731
             }
         }
 
@@ -58,49 +58,38 @@ class Metadata(BaseModel):
 
 class IncomingMessage(BaseModel):
     """Schema for incoming API request from GUVI platform."""
-    sessionId: Optional[str] = Field(None, description="Unique session identifier")
-    message: Optional[Any] = Field(None, description="Current message - can be string or MessageData object")
+    sessionId: str = Field(..., description="Unique session identifier")
+    message: MessageData = Field(..., description="Current message from scammer")
     conversationHistory: Optional[List[MessageData]] = Field(
         default_factory=list,
         description="Previous messages in conversation"
     )
     metadata: Optional[Metadata] = Field(
-        default_factory=Metadata,
+        None,
         description="Additional metadata"
     )
-    # Alternative field names GUVI might use
-    session_id: Optional[str] = Field(None, description="Alternative session ID field")
-    text: Optional[str] = Field(None, description="Direct text field")
-    msg: Optional[str] = Field(None, description="Alternative message field")
 
     def get_session_id(self) -> str:
-        """Get session ID from various possible field names."""
-        return self.sessionId or self.session_id or "default-session"
+        """Get session ID."""
+        return self.sessionId
 
     def get_message_text(self) -> str:
-        """Get message text from various possible formats."""
-        # If message is a string directly
-        if isinstance(self.message, str):
-            return self.message
-        # If message is a dict/MessageData object
-        if isinstance(self.message, dict):
-            return self.message.get("text", self.message.get("content", ""))
-        if hasattr(self.message, "text"):
-            return self.message.text
-        # Try alternative fields
-        if self.text:
-            return self.text
-        if self.msg:
-            return self.msg
-        return ""
+        """Get message text."""
+        return self.message.text
 
     def get_sender(self) -> str:
         """Get sender from message."""
-        if isinstance(self.message, dict):
-            return self.message.get("sender", "scammer")
-        if hasattr(self.message, "sender"):
-            return self.message.sender
-        return "scammer"
+        return self.message.sender
+
+    def get_timestamp(self) -> str:
+        """Get timestamp as ISO string."""
+        if self.message.timestamp:
+            # If it's a number (epoch ms), convert to ISO
+            if isinstance(self.message.timestamp, (int, float)):
+                from datetime import datetime
+                return datetime.fromtimestamp(self.message.timestamp / 1000).isoformat()
+            return str(self.message.timestamp)
+        return datetime.utcnow().isoformat()
 
     class Config:
         json_schema_extra = {
