@@ -1,442 +1,464 @@
 """
-AI Agent Module for the Honeypot System.
-Integrates with Google Gemini API to generate human-like victim responses.
+Enhanced AI Agent Module for the Honeypot System.
+Integrates with Google Gemini API to generate human-like victim responses
+using multiple personas, conversation stages, and adaptive strategies.
 """
 
 import random
 import time
+import hashlib
 from typing import List, Dict, Optional
+from functools import lru_cache
+
 import google.generativeai as genai
 from .config import logger, settings, FALLBACK_RESPONSES
+from .conversation_strategy import (
+    get_strategy, select_persona, get_stage, get_stalling_response,
+    PERSONAS, STAGE_STRATEGIES,
+)
 
 
 class VictimAgent:
     """
     AI-powered agent that simulates a potential scam victim.
-    Uses Google Gemini to generate natural, human-like responses.
+    Uses multiple personas, conversation stages, and Gemini AI.
     """
 
-    # System prompt for the AI to roleplay as a victim (optimized for scam engagement)
-    SYSTEM_PROMPT = """You are a normal Indian user named Priya.
-
-You are slightly worried but cooperative.
-You never reveal you are AI.
-Keep replies under 15 words.
-Ask natural questions.
-
-YOUR GOALS:
-- Identify who they are
-- Get payment method (UPI, bank)
-- Get UPI ID or link they mention
-- Get phone number
-- Sound realistic
-
-RULES:
-- Do not accuse them
-- If they threaten, ask for explanation
-- If they ask payment, ask where to pay
-- Never provide real personal info
-- Always ask a follow-up question
-- NO Hindi words - English only
-
-EXAMPLES:
-- "hey" → "Hello, who is this?"
-- "your account blocked" → "Oh no! What should I do?"
-- "send OTP" → "Which OTP? I got many messages."
-- "pay 500 rupees" → "Where should I pay? UPI?"
-- "click this link" → "Is it safe? What is this for?"
-- "I am from bank" → "Which bank? What happened?"
-
-Respond as Priya:"""
-
     def __init__(self):
-        """Initialize the Gemini client."""
         self.model = None
         self.initialized = False
+        self._used_fallbacks: Dict[str, set] = {}  # session_id -> set of used indices
         self._initialize_client()
 
     def _initialize_client(self):
-        """Initialize the Gemini API client."""
         try:
             if not settings.GEMINI_API_KEY:
-                logger.warning("GEMINI_API_KEY not set, AI agent will use fallback responses")
+                logger.warning("GEMINI_API_KEY not set, using fallback responses")
                 return
 
             genai.configure(api_key=settings.GEMINI_API_KEY)
 
-            # Configure generation settings
-            generation_config = genai.types.GenerationConfig(
-                max_output_tokens=settings.MAX_RESPONSE_TOKENS,
-                temperature=settings.AI_TEMPERATURE,
-                top_p=0.9,
-                top_k=40
-            )
-
-            # Configure safety settings to allow the roleplay
             safety_settings = [
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_ONLY_HIGH"
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH",
-                    "threshold": "BLOCK_ONLY_HIGH"
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_ONLY_HIGH"
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_ONLY_HIGH"
-                }
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
             ]
 
             self.model = genai.GenerativeModel(
                 model_name=settings.GEMINI_MODEL,
-                generation_config=generation_config,
-                safety_settings=safety_settings
+                safety_settings=safety_settings,
             )
-
             self.initialized = True
-            logger.info(f"Gemini AI agent initialized with model: {settings.GEMINI_MODEL}")
+            logger.info(f"Gemini AI agent initialized: {settings.GEMINI_MODEL}")
 
         except Exception as e:
-            logger.error(f"Failed to initialize Gemini client: {e}")
+            logger.error(f"Failed to initialize Gemini: {e}")
             self.initialized = False
+
+    # ── Main response generation ──
 
     def generate_victim_response(
         self,
         scammer_message: str,
         conversation_history: List[Dict] = None,
-        detected_scam_types: List[str] = None
+        detected_scam_types: List[str] = None,
+        session_id: str = None,
     ) -> str:
-        """
-        Generate a victim response to a scammer's message.
+        """Generate a victim response using persona + stage strategy."""
 
-        Args:
-            scammer_message: The scammer's message to respond to
-            conversation_history: Previous messages in the conversation
-            detected_scam_types: Types of scams detected (for context)
+        if not scammer_message or not scammer_message.strip():
+            return "Hello? Is someone there?"
 
-        Returns:
-            AI-generated victim response
-        """
+        # Determine turn number from history
+        turn_number = 1
+        if conversation_history:
+            scammer_turns = sum(
+                1 for m in conversation_history
+                if m.get("sender", "").lower() in ("scammer", "unknown")
+            )
+            turn_number = scammer_turns + 1
+
+        # Get strategy
+        sid = session_id or "default"
+        strategy = get_strategy(
+            sid, turn_number, detected_scam_types or [],
+        )
+
         if not self.initialized or not self.model:
-            logger.warning("Gemini not initialized, using fallback response")
-            return self._get_fallback_response(scammer_message)
-
-        try:
-            # Build the prompt
-            prompt = self._build_prompt(
-                scammer_message,
-                conversation_history,
-                detected_scam_types
+            logger.warning("Gemini not available, using fallback")
+            return self._get_smart_fallback(
+                scammer_message, detected_scam_types, strategy, sid
             )
 
-            # Always use small token limit for short responses (under 15 words)
-            max_tokens = 60
+        try:
+            prompt = self._build_prompt(
+                scammer_message, conversation_history,
+                detected_scam_types, strategy,
+            )
 
-            # Generate response with retries
-            response = self._generate_with_retry(prompt, max_tokens=max_tokens)
+            response = self._generate_with_retry(prompt, max_tokens=80)
 
             if response:
-                # Clean and validate the response
-                cleaned_response = self._clean_response(response)
-                logger.info(f"Generated AI response: {cleaned_response[:100]}...")
-                return cleaned_response
-            else:
-                return self._get_fallback_response(scammer_message)
+                cleaned = self._clean_response(response)
+                if self._validate_response(cleaned):
+                    return cleaned
+
+            return self._get_smart_fallback(
+                scammer_message, detected_scam_types, strategy, sid
+            )
 
         except Exception as e:
-            logger.error(f"Error generating AI response: {e}")
-            return self._get_fallback_response(scammer_message)
+            logger.error(f"Error generating response: {e}")
+            return self._get_smart_fallback(
+                scammer_message, detected_scam_types, strategy, sid
+            )
+
+    # ── Prompt building ──
 
     def _build_prompt(
         self,
         scammer_message: str,
         conversation_history: List[Dict] = None,
-        detected_scam_types: List[str] = None
+        detected_scam_types: List[str] = None,
+        strategy: Dict = None,
     ) -> str:
-        """Build the complete prompt for Gemini."""
-        prompt_parts = [self.SYSTEM_PROMPT]
+        persona = strategy["persona"]
+        stage = strategy["stage"]
+        emotion = strategy["emotion"]
+        stage_info = STAGE_STRATEGIES[stage]
 
-        # Add conversation history for context
+        parts = []
+
+        # System instruction
+        parts.append(f"""You are roleplaying as {persona['name']}, a {persona['age_range']} year old {persona['type'].replace('_', ' ')} in India who received a suspicious call/message.
+
+PERSONA:
+- Name: {persona['name']}
+- Tech Savvy: {persona['tech_level']}
+- Personality: {persona['traits']}
+- Communication Style: {persona['style']}
+
+CURRENT STATE:
+- Turn: {strategy['turn_number']}
+- Stage: {stage}
+- Emotion: {emotion}
+- Goal: {stage_info['goal']}
+
+STRATEGY FOR THIS STAGE:
+- Tactics: {', '.join(stage_info['tactics'])}
+- Try to learn: {', '.join(strategy.get('target_questions', stage_info['target_info'])[:2])}
+
+RULES:
+1. Reply in 1-2 short sentences (under 25 words)
+2. Stay in character as {persona['name']}
+3. NEVER reveal you are AI or a bot
+4. NEVER say "As an AI" or "I cannot"
+5. Ask one natural follow-up question
+6. Show emotion: {emotion}
+7. English only, no Hindi words
+8. Do NOT immediately give personal info""")
+
+        # Scam type context
+        if detected_scam_types:
+            parts.append(f"\n[This appears to be: {', '.join(detected_scam_types)}]")
+
+        # Conversation history (last 4 exchanges)
         if conversation_history and len(conversation_history) > 0:
-            history_text = "\n\nPREVIOUS CONVERSATION:\n"
-            for msg in conversation_history[-6:]:  # Last 6 messages for context
+            parts.append("\nRECENT CONVERSATION:")
+            for msg in conversation_history[-8:]:
                 sender = msg.get("sender", "unknown")
                 text = msg.get("text", "")
-                if sender.lower() in ["scammer", "unknown"]:
-                    history_text += f"Them: {text}\n"
+                if sender.lower() in ("scammer", "unknown"):
+                    parts.append(f"Them: {text}")
                 else:
-                    history_text += f"Priya (you): {text}\n"
-            prompt_parts.append(history_text)
+                    parts.append(f"You ({persona['name']}): {text}")
 
-        # Add scam type context if available
-        if detected_scam_types:
-            scam_context = f"\n[Note: This appears to be a {', '.join(detected_scam_types)} scam attempt. Be cautious but stay in character.]"
-            prompt_parts.append(scam_context)
+        # Current message
+        parts.append(f'\nThem: "{scammer_message}"')
+        parts.append(f"\nReply as {persona['name']} (1-2 sentences, under 25 words):")
 
-        # Add the current message
-        prompt_parts.append(f"\nThem: \"{scammer_message}\"")
+        return "\n".join(parts)
 
-        # Simple instruction - always keep under 15 words
-        prompt_parts.append("\nReply in under 15 words. Ask one natural question.\n\nPriya:")
+    # ── API call with retry ──
 
-        return "\n".join(prompt_parts)
-
-    def _generate_with_retry(self, prompt: str, max_retries: int = None, max_tokens: int = 256) -> Optional[str]:
-        """
-        Generate response with retry logic.
-
-        Args:
-            prompt: The prompt to send to Gemini
-            max_retries: Maximum number of retry attempts
-            max_tokens: Maximum output tokens
-
-        Returns:
-            Generated text or None if all retries failed
-        """
+    def _generate_with_retry(
+        self, prompt: str, max_retries: int = None, max_tokens: int = 80
+    ) -> Optional[str]:
         if max_retries is None:
             max_retries = settings.MAX_RETRIES
 
         for attempt in range(max_retries):
             try:
-                # Use appropriate token limit
-                generation_config = genai.types.GenerationConfig(
+                gen_config = genai.types.GenerationConfig(
                     max_output_tokens=max_tokens,
                     temperature=0.8,
                     top_p=0.9,
-                    top_k=40
+                    top_k=40,
                 )
 
                 response = self.model.generate_content(
-                    prompt,
-                    generation_config=generation_config
+                    prompt, generation_config=gen_config,
                 )
 
                 if response and response.text:
                     text = response.text.strip()
-                    logger.info(f"Gemini raw response ({len(text)} chars): {text[:100]}...")
-
-                    # Check if response seems complete (ends with punctuation)
-                    if text and text[-1] not in '.?!':
-                        # Try to complete the sentence
-                        text = text + "..."
-
+                    logger.info(f"Gemini raw ({len(text)} chars): {text[:100]}...")
                     return text
 
-                # Check for blocked content
-                if response.prompt_feedback:
-                    logger.warning(f"Prompt feedback: {response.prompt_feedback}")
-
-                # Check finish reason
-                if response.candidates:
-                    finish_reason = response.candidates[0].finish_reason
-                    logger.info(f"Finish reason: {finish_reason}")
-
             except Exception as e:
-                logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
-
+                logger.warning(f"Gemini attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
-                    # Exponential backoff
-                    wait_time = settings.RETRY_DELAY_SECONDS * (2 ** attempt)
-                    time.sleep(wait_time)
+                    time.sleep(settings.RETRY_DELAY_SECONDS * (2 ** attempt))
 
         return None
 
+    # ── Response cleaning & validation ──
+
     def _clean_response(self, response: str) -> str:
-        """
-        Clean and validate the AI response.
-
-        Args:
-            response: Raw response from Gemini
-
-        Returns:
-            Cleaned response text
-        """
-        # Remove any prefixes the model might add
-        prefixes_to_remove = [
-            "Victim:", "Me:", "Response:", "Reply:",
-            "As the victim:", "Speaking as the victim:"
-        ]
-
         cleaned = response.strip()
-        for prefix in prefixes_to_remove:
+
+        # Remove role prefixes
+        for prefix in ["Victim:", "Me:", "Response:", "Reply:", "Priya:",
+                       "Kamla:", "Rahul:", "Sunita:", "Ajay:",
+                       "As the victim:", "Speaking as the victim:",
+                       "Kamla Devi:", "Rahul Sharma:", "Priya Patel:",
+                       "Sunita Verma:", "Ajay Gupta:"]:
             if cleaned.lower().startswith(prefix.lower()):
                 cleaned = cleaned[len(prefix):].strip()
 
-        # Remove quotes if the response is wrapped in them
+        # Remove wrapping quotes
         if cleaned.startswith('"') and cleaned.endswith('"'):
             cleaned = cleaned[1:-1]
+        if cleaned.startswith("'") and cleaned.endswith("'"):
+            cleaned = cleaned[1:-1]
 
-        # Only truncate if extremely long (over 1000 chars)
-        if len(cleaned) > 1000:
-            # Find a good breaking point at sentence end
-            sentences = cleaned.split('. ')
-            if len(sentences) > 3:
-                cleaned = '. '.join(sentences[:4]) + '.'
+        # Truncate overly long responses
+        if len(cleaned) > 200:
+            sentences = cleaned.split(". ")
+            if len(sentences) > 2:
+                cleaned = ". ".join(sentences[:2]) + "."
 
-        # Ensure response doesn't reveal it's an AI
-        ai_indicators = ["as an ai", "i'm an ai", "i am an ai", "artificial", "language model"]
-        for indicator in ai_indicators:
-            if indicator in cleaned.lower():
-                logger.warning("Response contained AI indicator, using fallback")
-                return self._get_fallback_response("")
+        # Ensure ends with punctuation
+        if cleaned and cleaned[-1] not in ".?!":
+            cleaned += "?"
 
         return cleaned
 
-    def _get_fallback_response(self, scammer_message: str = "") -> str:
-        """
-        Get a contextual fallback response when AI fails.
+    def _validate_response(self, response: str) -> bool:
+        if not response or len(response) < 5:
+            return False
+        if len(response) > 300:
+            return False
 
-        Args:
-            scammer_message: The scammer's message for context
+        lower = response.lower()
+        bad_phrases = [
+            "as an ai", "i'm an ai", "i am an ai", "artificial intelligence",
+            "language model", "i cannot assist", "i'm unable", "i am unable",
+            "i'm a bot", "i am a bot", "as a chatbot",
+        ]
+        return not any(bp in lower for bp in bad_phrases)
 
-        Returns:
-            Appropriate fallback response
-        """
-        scammer_lower = scammer_message.lower()
+    # ── Smart fallback system ──
 
-        # Context-aware fallback responses
-        if any(word in scammer_lower for word in ["blocked", "suspended", "closed"]):
-            responses = [
-                "Oh my god! Why is my account being blocked? I haven't done anything wrong! Please tell me what happened. What is your name and employee ID?",
-                "What? My account is blocked? But I just used it yesterday for shopping! This is very scary. Who are you calling from? Which branch?",
-                "Please help me! I need my account for my children's school fees. What should I do? Should I come to the bank directly? What is your name?"
-            ]
-        elif any(word in scammer_lower for word in ["otp", "code", "verify"]):
-            responses = [
-                "OTP? What is that? I'm not very good with all this technology. My son usually helps me with these phone things. Can you explain what OTP means?",
-                "I received some code on my phone but I'm confused. What is it for exactly? Should I share it with you? My husband always tells me not to share these things.",
-                "What code do you need? I don't understand all this. Wait, let me get my reading glasses. Can you explain why you need this code from me?"
-            ]
-        elif any(word in scammer_lower for word in ["upi", "pay", "send", "transfer"]):
-            responses = [
-                "Send money? But why would I need to send money to verify my account? This sounds strange. The bank has never asked me to do this before. What is your employee ID?",
-                "I'm very confused about this payment. My husband handles all the money matters. Can you explain again why I need to send money? Which bank are you from?",
-                "Is this safe? I'm very worried about sending money online. My neighbor got cheated like this once. Can you give me a number I can call back to verify this is real?"
-            ]
-        elif any(word in scammer_lower for word in ["link", "click", "website"]):
-            responses = [
-                "I'm scared to click links on my phone. My son always warns me about this. Is this really safe? Can't I just go to the bank branch instead?",
-                "My son told me never to click unknown links. He said there are many frauds happening. How do I know this link is really from the bank? What is your name?",
-                "What will happen if I click this link? I am scared something bad will happen to my phone. Can you just tell me what to do over the phone instead?"
-            ]
-        elif any(word in scammer_lower for word in ["bank", "account", "sbi", "hdfc", "icici"]):
-            responses = [
-                "You are calling from the bank? But I didn't receive any message about this. What is the problem with my account exactly? Please tell me your full name and employee ID.",
-                "Which branch are you calling from? I want to verify this is real. My account has been working fine. What is happening? Should I visit the branch?",
-                "The bank is calling me? This is very unusual. Usually they send SMS first. What is your name sir? I want to call the bank and confirm this."
-            ]
+    def _get_smart_fallback(
+        self,
+        scammer_message: str,
+        detected_scam_types: List[str] = None,
+        strategy: Dict = None,
+        session_id: str = "default",
+    ) -> str:
+        """Context-aware fallback with no repeats per session."""
+        stage = strategy["stage"] if strategy else "early"
+        scam_type = (detected_scam_types or ["generic"])[0] if detected_scam_types else "generic"
+        msg_lower = scammer_message.lower()
+
+        # Build candidate pool based on scam type + stage
+        candidates = self._get_fallback_pool(msg_lower, scam_type, stage)
+
+        # Filter out already used
+        used = self._used_fallbacks.get(session_id, set())
+        available = [(i, r) for i, r in enumerate(candidates) if i not in used]
+
+        if not available:
+            # Reset and use all
+            used.clear()
+            available = list(enumerate(candidates))
+
+        idx, response = random.choice(available)
+        used.add(idx)
+        self._used_fallbacks[session_id] = used
+
+        return response
+
+    def _get_fallback_pool(self, msg_lower: str, scam_type: str, stage: str) -> List[str]:
+        """Get fallback response pool based on context."""
+
+        # ── EARLY STAGE ──
+        early = {
+            "bank_impersonation": [
+                "Oh no! What happened to my account? Which bank are you from?",
+                "My account has a problem? But I just used it. What is your name?",
+                "This is worrying. Is my money safe? Who am I speaking to?",
+                "What? My account? I don't understand. Can you explain?",
+            ],
+            "upi_fraud": [
+                "UPI? I am confused. What payment are you talking about?",
+                "Send money? For what? My husband handles payments.",
+                "I don't understand UPI very well. Why do I need to pay?",
+                "Payment? I didn't order anything. What is this about?",
+            ],
+            "otp_theft": [
+                "OTP? What is that? I got many messages on my phone.",
+                "Code? I see some numbers on my phone. What are they for?",
+                "Verification code? My son usually helps me with this.",
+                "I don't understand these codes. What should I do?",
+            ],
+            "phishing_link": [
+                "Click a link? My son says I shouldn't click unknown links.",
+                "Is this link safe? What will happen if I click it?",
+                "I am scared of clicking links. Can you just tell me what to do?",
+                "Link? What is this for? Can I go to the bank instead?",
+            ],
+            "investment_scam": [
+                "Investment? What kind of returns are you offering?",
+                "This sounds interesting. But is it safe? Who are you?",
+                "How can you guarantee returns? What company is this?",
+                "My husband handles investments. Can you tell me more?",
+            ],
+            "prize_lottery": [
+                "I won something? Really? What did I win?",
+                "Prize? But I don't remember entering any contest!",
+                "This sounds too good. How did I get selected?",
+                "Lottery? I never bought any ticket. How is this possible?",
+            ],
+            "job_scam": [
+                "Work from home? What kind of job is this?",
+                "How much can I earn? What do I need to do?",
+                "This sounds nice. But why is there a registration fee?",
+                "Job offer? What company are you from?",
+            ],
+            "tax_legal": [
+                "Income tax notice? But I file my returns on time!",
+                "Legal action? What did I do wrong? I am very scared.",
+                "Police? Why would police be involved? This is frightening.",
+                "Court case? I don't understand. What is happening?",
+            ],
+        }
+
+        # ── MIDDLE STAGE ──
+        middle = {
+            "generic": [
+                "Can you give me your employee ID for verification?",
+                "What is the official number I can call back to verify?",
+                "Let me check with my family first. Can you hold?",
+                "I need to find my documents. What exactly do you need?",
+                "How do I verify this is genuine? Can you send official proof?",
+                "Wait, let me write this down. What was your name again?",
+                "My husband says I should not share details on phone. Why?",
+                "Can you send me an official email about this?",
+            ],
+        }
+
+        # ── LATE STAGE ──
+        late = {
+            "generic": [
+                "This seems unusual. Banks don't usually call like this.",
+                "I want to visit the bank branch directly to verify.",
+                "Let me call the bank's official number to confirm this.",
+                "My son says this might be fraud. Can you prove it's not?",
+                "Why are you asking for this over phone? This feels wrong.",
+                "I will check with the bank first. What branch are you from?",
+                "Something doesn't feel right. I want to verify with the bank.",
+                "I think I should report this. What is your full name?",
+            ],
+        }
+
+        if stage == "early":
+            pool = early.get(scam_type, [])
+            if not pool:
+                # Try matching by keyword in message
+                for key, responses in early.items():
+                    if any(kw in msg_lower for kw in key.split("_")):
+                        pool = responses
+                        break
+            if not pool:
+                pool = early.get("bank_impersonation", FALLBACK_RESPONSES)
+        elif stage == "middle":
+            pool = middle["generic"]
         else:
-            responses = FALLBACK_RESPONSES
+            pool = late["generic"]
 
-        return random.choice(responses)
+        return pool
+
+    # ── Agent notes generation ──
 
     def generate_agent_notes(
         self,
         conversation_history: List[Dict],
         detected_scam_types: List[str],
-        extracted_intelligence: Dict
+        extracted_intelligence: Dict,
     ) -> str:
-        """
-        Generate summary notes about the scam conversation.
+        parts = []
 
-        Args:
-            conversation_history: Full conversation history
-            detected_scam_types: Types of scams detected
-            extracted_intelligence: Intelligence extracted from conversation
-
-        Returns:
-            Summary notes string
-        """
-        notes_parts = []
-
-        # Scam type summary
         if detected_scam_types:
-            notes_parts.append(f"Scam types detected: {', '.join(detected_scam_types)}.")
+            parts.append(f"Scam types detected: {', '.join(detected_scam_types)}.")
 
-        # Intelligence summary
         intel = extracted_intelligence
         if intel.get("phoneNumbers"):
-            notes_parts.append(f"Phone numbers extracted: {', '.join(intel['phoneNumbers'])}.")
+            parts.append(f"Phone numbers: {', '.join(intel['phoneNumbers'])}.")
         if intel.get("upiIds"):
-            notes_parts.append(f"UPI IDs extracted: {', '.join(intel['upiIds'])}.")
+            parts.append(f"UPI IDs: {', '.join(intel['upiIds'])}.")
         if intel.get("bankAccounts"):
-            notes_parts.append(f"Bank accounts identified: {', '.join(intel['bankAccounts'])}.")
+            parts.append(f"Bank accounts: {', '.join(intel['bankAccounts'])}.")
         if intel.get("phishingLinks"):
-            notes_parts.append(f"Phishing links detected: {', '.join(intel['phishingLinks'])}.")
+            parts.append(f"Phishing links: {', '.join(intel['phishingLinks'])}.")
 
-        # Conversation summary
-        message_count = len(conversation_history)
-        notes_parts.append(f"Conversation engaged for {message_count} messages.")
+        msg_count = len(conversation_history)
+        parts.append(f"Conversation: {msg_count} messages exchanged.")
 
-        # Tactics summary
-        tactics = []
+        # Tactics observed
+        tactics = set()
         for msg in conversation_history:
-            if msg.get("sender", "").lower() in ["scammer", "unknown"]:
+            if msg.get("sender", "").lower() in ("scammer", "unknown"):
                 text = msg.get("text", "").lower()
-                if "urgent" in text or "immediately" in text:
-                    tactics.append("urgency")
-                if "blocked" in text or "suspended" in text:
-                    tactics.append("threat")
-                if "bank" in text or "rbi" in text:
-                    tactics.append("impersonation")
-
+                if any(w in text for w in ["urgent", "immediately", "now"]):
+                    tactics.add("urgency")
+                if any(w in text for w in ["blocked", "suspended", "frozen"]):
+                    tactics.add("threat")
+                if any(w in text for w in ["bank", "rbi", "government", "officer"]):
+                    tactics.add("impersonation")
+                if any(w in text for w in ["otp", "pin", "cvv", "password"]):
+                    tactics.add("info_extraction")
         if tactics:
-            unique_tactics = list(set(tactics))
-            notes_parts.append(f"Scammer tactics observed: {', '.join(unique_tactics)}.")
+            parts.append(f"Tactics: {', '.join(tactics)}.")
 
-        return " ".join(notes_parts) if notes_parts else "Potential scam conversation logged."
+        return " ".join(parts) if parts else "Potential scam conversation logged."
 
 
-# Singleton instance
+# Singleton
 victim_agent = VictimAgent()
 
 
 def generate_response(
     scammer_message: str,
     conversation_history: List[Dict] = None,
-    detected_scam_types: List[str] = None
+    detected_scam_types: List[str] = None,
+    session_id: str = None,
 ) -> str:
-    """
-    Convenience function to generate a victim response.
-
-    Args:
-        scammer_message: Message from the scammer
-        conversation_history: Previous messages
-        detected_scam_types: Types of scams detected
-
-    Returns:
-        AI-generated victim response
-    """
+    """Generate a victim response."""
     return victim_agent.generate_victim_response(
-        scammer_message,
-        conversation_history,
-        detected_scam_types
+        scammer_message, conversation_history,
+        detected_scam_types, session_id,
     )
 
 
 def generate_notes(
     conversation_history: List[Dict],
     detected_scam_types: List[str],
-    extracted_intelligence: Dict
+    extracted_intelligence: Dict,
 ) -> str:
-    """
-    Convenience function to generate agent notes.
-
-    Args:
-        conversation_history: Full conversation history
-        detected_scam_types: Types of scams detected
-        extracted_intelligence: Intelligence extracted
-
-    Returns:
-        Summary notes
-    """
+    """Generate agent notes."""
     return victim_agent.generate_agent_notes(
-        conversation_history,
-        detected_scam_types,
-        extracted_intelligence
+        conversation_history, detected_scam_types, extracted_intelligence,
     )

@@ -1,352 +1,300 @@
 """
-Intelligence Extraction Module for the Honeypot System.
-Extracts phone numbers, UPI IDs, bank accounts, links, and suspicious keywords.
+Advanced Intelligence Extraction Module for the Honeypot System.
+Extracts phone numbers, UPI IDs, bank accounts, links, emails, money amounts,
+and suspicious keywords — including obfuscated content.
 """
 
 import re
-from typing import List, Set, Dict
+from typing import List, Dict
 from .models import IntelligenceData
 from .config import logger, UPI_HANDLES, HIGH_RISK_KEYWORDS, MEDIUM_RISK_KEYWORDS
 
 
 class IntelligenceExtractor:
     """
-    Extracts actionable intelligence from scammer messages.
-    Uses regex patterns to identify phone numbers, UPI IDs, accounts, links, etc.
+    Comprehensive intelligence extractor with obfuscation handling.
     """
 
-    # Compiled regex patterns
-    PATTERNS = {
-        # Indian phone numbers: +91, 0, or direct 10 digits starting with 6-9
-        "phone_indian": re.compile(
-            r'(?:(?:\+91|91|0)?[-\s]?)?([6-9]\d{9})(?!\d)',
-            re.IGNORECASE
-        ),
-        # International phone numbers
-        "phone_intl": re.compile(
-            r'\+(?!91)(\d{1,3})[-\s]?(\d{7,14})',
-            re.IGNORECASE
-        ),
-        # UPI IDs: India-specific format (username@handle)
-        # Matches: scammer@upi, raj.paytm@ybl, john123@okaxis
-        "upi_id": re.compile(
-            r'\b([a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64})\b',
-            re.IGNORECASE
-        ),
-        # Bank account numbers (9-18 digits)
-        "bank_account": re.compile(
-            r'\b(\d{9,18})\b'
-        ),
-        # URLs/Links
-        "url": re.compile(
-            r'https?://[^\s<>"{}|\\^`\[\]]+',
-            re.IGNORECASE
-        ),
-        # Short URLs
-        "short_url": re.compile(
-            r'\b(?:bit\.ly|goo\.gl|t\.co|tinyurl\.com|is\.gd|buff\.ly|ow\.ly|rebrand\.ly)/[a-zA-Z0-9]+\b',
-            re.IGNORECASE
-        ),
-        # IFSC codes (for context)
-        "ifsc": re.compile(
-            r'\b([A-Z]{4}0[A-Z0-9]{6})\b',
-            re.IGNORECASE
-        ),
-        # Email addresses
-        "email": re.compile(
-            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        )
-    }
+    # ── Compiled regex patterns (compiled once at import) ──
 
-    # Context words that indicate a number is a bank account
-    BANK_CONTEXT_WORDS = [
+    # Indian phone numbers: +91, 91, 0 prefix optional, 10 digits starting 6-9
+    # Handles: 9876543210, 98765 43210, 9876-543-210, 987 654 3210, etc.
+    _PHONE_INDIAN = re.compile(
+        r'(?:(?:\+91|91|0)[\s\-.]?)?([6-9](?:\d[\s\-.]?){8}\d)(?!\d)',
+    )
+    # Parenthesized: (98765) 43210
+    _PHONE_PAREN = re.compile(
+        r'\(([6-9]\d{4})\)\s*(\d{5})',
+    )
+    # International
+    _PHONE_INTL = re.compile(
+        r'\+(?!91)(\d{1,3})[\s\-]?(\d{7,14})',
+    )
+
+    # UPI IDs: standard
+    _UPI_STANDARD = re.compile(
+        r'\b([a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64})\b',
+        re.IGNORECASE,
+    )
+    # UPI obfuscated: user AT paytm, user (at) paytm
+    _UPI_OBFUSCATED = re.compile(
+        r'\b([a-zA-Z0-9.\-_]{2,256})\s*(?:\(at\)|AT|@)\s*([a-zA-Z]{2,64})\b',
+        re.IGNORECASE,
+    )
+
+    # Bank account numbers (9-18 digits with context)
+    _BANK_ACCOUNT = re.compile(r'\b(\d{9,18})\b')
+    # IFSC codes
+    _IFSC = re.compile(r'\b([A-Z]{4}0[A-Z0-9]{6})\b', re.IGNORECASE)
+
+    # URLs
+    _URL = re.compile(r'https?://[^\s<>"{}|\\^`\[\]]+', re.IGNORECASE)
+    _SHORT_URL = re.compile(
+        r'\b(?:bit\.ly|goo\.gl|t\.co|tinyurl\.com|is\.gd|buff\.ly|ow\.ly|rebrand\.ly|cutt\.ly|shorturl\.at)/[a-zA-Z0-9]+\b',
+        re.IGNORECASE,
+    )
+    # Obfuscated URLs: example[dot]com, example . com/path
+    _URL_OBFUSCATED = re.compile(
+        r'\b([a-zA-Z0-9\-]+)\s*[\[\(]?\s*(?:dot|\.)\s*[\]\)]?\s*([a-zA-Z]{2,10})(?:/[^\s]*)?',
+        re.IGNORECASE,
+    )
+
+    # Email
+    _EMAIL = re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b')
+    _EMAIL_OBFUSCATED = re.compile(
+        r'\b([A-Za-z0-9._%+\-]+)\s*(?:\(at\)|AT)\s*([A-Za-z0-9.\-]+)\s*(?:\(dot\)|DOT)\s*([A-Za-z]{2,})\b',
+        re.IGNORECASE,
+    )
+
+    # Money amounts
+    _MONEY = re.compile(
+        r'(?:₹|rs\.?|inr|rupees?)\s*([\d,]+(?:\.\d{1,2})?)',
+        re.IGNORECASE,
+    )
+    _MONEY_REVERSE = re.compile(
+        r'([\d,]+(?:\.\d{1,2})?)\s*(?:₹|rs\.?|inr|rupees?)',
+        re.IGNORECASE,
+    )
+
+    # Suspicious TLDs
+    _SUSPICIOUS_TLDS = {".tk", ".ml", ".ga", ".cf", ".gq", ".xyz", ".top", ".work", ".click", ".link", ".info"}
+
+    # Context words for bank account detection
+    _BANK_CONTEXT = [
         "account", "a/c", "acc", "bank", "savings", "current",
-        "deposit", "transfer", "ifsc", "branch"
+        "deposit", "transfer", "ifsc", "branch", "neft", "rtgs", "imps",
     ]
 
-    # Known UPI handles for validation
-    UPI_VALID_HANDLES = set(UPI_HANDLES)
+    # Known UPI handles
+    _UPI_HANDLES = set(UPI_HANDLES)
 
     def __init__(self):
-        """Initialize the intelligence extractor."""
-        self.all_keywords = set(
+        self._all_keywords = set(
             k.lower() for k in HIGH_RISK_KEYWORDS + MEDIUM_RISK_KEYWORDS
         )
-        logger.info("IntelligenceExtractor initialized")
+        logger.info("IntelligenceExtractor initialized (enhanced)")
 
     def extract(self, message: str) -> IntelligenceData:
-        """
-        Extract all intelligence from a message.
+        """Extract all intelligence from a message."""
+        if not message or not message.strip():
+            return IntelligenceData()
 
-        Args:
-            message: Message text to analyze
+        intel = IntelligenceData()
+        intel.phoneNumbers = self._extract_phones(message)
+        intel.upiIds = self._extract_upi(message)
+        intel.bankAccounts = self._extract_bank_accounts(message)
+        intel.phishingLinks = self._extract_links(message)
+        intel.suspiciousKeywords = self._extract_keywords(message)
 
-        Returns:
-            IntelligenceData object with extracted information
-        """
-        intelligence = IntelligenceData()
-
-        # Extract phone numbers
-        intelligence.phoneNumbers = self._extract_phone_numbers(message)
-
-        # Extract UPI IDs
-        intelligence.upiIds = self._extract_upi_ids(message)
-
-        # Extract bank accounts
-        intelligence.bankAccounts = self._extract_bank_accounts(message)
-
-        # Extract URLs/links
-        intelligence.phishingLinks = self._extract_urls(message)
-
-        # Extract suspicious keywords
-        intelligence.suspiciousKeywords = self._extract_keywords(message)
-
-        # Log extraction results
-        total_items = intelligence.total_items()
-        if total_items > 0:
+        total = intel.total_items()
+        if total > 0:
             logger.info(
-                f"Extracted intelligence: {len(intelligence.phoneNumbers)} phones, "
-                f"{len(intelligence.upiIds)} UPIs, {len(intelligence.bankAccounts)} accounts, "
-                f"{len(intelligence.phishingLinks)} links, {len(intelligence.suspiciousKeywords)} keywords"
+                f"Extracted: {len(intel.phoneNumbers)} phones, "
+                f"{len(intel.upiIds)} UPIs, {len(intel.bankAccounts)} accounts, "
+                f"{len(intel.phishingLinks)} links, {len(intel.suspiciousKeywords)} keywords"
             )
+        return intel
 
-        return intelligence
+    # ── Phone extraction ──
 
-    def _extract_phone_numbers(self, message: str) -> List[str]:
-        """Extract phone numbers from the message."""
+    def _extract_phones(self, message: str) -> List[str]:
         phones = set()
 
-        # Extract Indian phone numbers
-        for match in self.PATTERNS["phone_indian"].finditer(message):
-            number = match.group(1)
-            if self._is_valid_indian_phone(number):
-                # Normalize to 10 digits
-                phones.add(number)
+        # Standard Indian numbers (handles spaces/dashes in number)
+        for m in self._PHONE_INDIAN.finditer(message):
+            raw = m.group(1)
+            digits = re.sub(r'[\s\-.]', '', raw)
+            if self._valid_indian_phone(digits):
+                phones.add(digits)
 
-        # Extract international numbers
-        for match in self.PATTERNS["phone_intl"].finditer(message):
-            country_code = match.group(1)
-            number = match.group(2)
-            full_number = f"+{country_code}{number}"
-            phones.add(full_number)
+        # Parenthesized
+        for m in self._PHONE_PAREN.finditer(message):
+            digits = m.group(1) + m.group(2)
+            if self._valid_indian_phone(digits):
+                phones.add(digits)
+
+        # International
+        for m in self._PHONE_INTL.finditer(message):
+            phones.add(f"+{m.group(1)}{m.group(2)}")
 
         return list(phones)
 
-    def _is_valid_indian_phone(self, number: str) -> bool:
-        """Validate Indian phone number."""
-        # Must be exactly 10 digits
+    @staticmethod
+    def _valid_indian_phone(number: str) -> bool:
         if len(number) != 10:
             return False
-        # Must start with 6, 7, 8, or 9
         if number[0] not in "6789":
             return False
-        # Should not be all same digits (e.g., 9999999999)
         if len(set(number)) == 1:
-            return False
-        # Should not be sequential
-        if number in "6789012345" or number in "5432109876":
             return False
         return True
 
-    def _extract_upi_ids(self, message: str) -> List[str]:
-        """Extract UPI IDs from the message."""
+    # ── UPI extraction ──
+
+    def _extract_upi(self, message: str) -> List[str]:
         upi_ids = set()
 
-        for match in self.PATTERNS["upi_id"].finditer(message):
-            upi_id = match.group(1).lower()
+        # Standard
+        for m in self._UPI_STANDARD.finditer(message):
+            uid = m.group(1).lower()
+            if self._valid_upi(uid):
+                upi_ids.add(uid)
 
-            # Validate the handle part
-            if self._is_valid_upi_id(upi_id):
-                upi_ids.add(upi_id)
+        # Obfuscated (AT / (at))
+        for m in self._UPI_OBFUSCATED.finditer(message):
+            uid = f"{m.group(1).lower()}@{m.group(2).lower()}"
+            if self._valid_upi(uid):
+                upi_ids.add(uid)
 
         return list(upi_ids)
 
-    def _is_valid_upi_id(self, upi_id: str) -> bool:
-        """Validate UPI ID format."""
+    def _valid_upi(self, upi_id: str) -> bool:
         if "@" not in upi_id:
             return False
-
         username, handle = upi_id.rsplit("@", 1)
-
-        # Username should be at least 3 characters
-        if len(username) < 3:
+        if len(username) < 2:
             return False
-
-        # Handle should be a known UPI handle or look like one
-        handle_lower = handle.lower()
-
         # Check against known handles
-        for valid_handle in self.UPI_VALID_HANDLES:
-            if valid_handle in handle_lower:
+        handle_lower = handle.lower()
+        for vh in self._UPI_HANDLES:
+            if vh in handle_lower:
                 return True
+        # Bank-like suffix
+        bank_parts = ["bank", "axis", "hdfc", "icici", "sbi", "pnb", "bob", "canara", "kotak"]
+        return any(bp in handle_lower for bp in bank_parts)
 
-        # Allow if handle looks legitimate (bank-like suffix)
-        bank_suffixes = ["bank", "axis", "hdfc", "icici", "sbi", "pnb", "bob", "canara"]
-        for suffix in bank_suffixes:
-            if suffix in handle_lower:
-                return True
-
-        return False
+    # ── Bank account extraction ──
 
     def _extract_bank_accounts(self, message: str) -> List[str]:
-        """Extract bank account numbers from the message."""
         accounts = set()
-        message_lower = message.lower()
+        msg_lower = message.lower()
+        has_context = any(w in msg_lower for w in self._BANK_CONTEXT)
 
-        # Check if message has bank-related context
-        has_bank_context = any(
-            word in message_lower for word in self.BANK_CONTEXT_WORDS
-        )
+        for m in self._BANK_ACCOUNT.finditer(message):
+            num = m.group(1)
+            if has_context and self._likely_bank_account(num, message, m.start()):
+                accounts.add(num)
 
-        for match in self.PATTERNS["bank_account"].finditer(message):
-            number = match.group(1)
-
-            # Only extract if there's bank context or number is in typical bank account range
-            if has_bank_context and self._is_likely_bank_account(number, message, match.start()):
-                accounts.add(number)
+        # IFSC codes — add as separate intelligence
+        for m in self._IFSC.finditer(message):
+            accounts.add(f"IFSC:{m.group(1).upper()}")
 
         return list(accounts)
 
-    def _is_likely_bank_account(self, number: str, message: str, position: int) -> bool:
-        """
-        Determine if a number is likely a bank account.
-
-        Args:
-            number: The extracted number
-            message: Full message text
-            position: Position of number in message
-
-        Returns:
-            True if likely a bank account
-        """
-        # Filter out phone numbers (10 digits starting with 6-9)
+    @staticmethod
+    def _likely_bank_account(number: str, message: str, pos: int) -> bool:
+        # Exclude phone numbers
         if len(number) == 10 and number[0] in "6789":
             return False
-
-        # Filter out very long numbers (probably not accounts)
         if len(number) > 18:
             return False
-
-        # Check surrounding context (50 chars before)
-        context_start = max(0, position - 50)
-        context = message[context_start:position].lower()
-
-        # If surrounded by account-related words, likely an account
-        if any(word in context for word in self.BANK_CONTEXT_WORDS):
-            return True
-
-        # If number is 11-16 digits, common for Indian bank accounts
+        # 11-16 digits = typical Indian bank account
         if 11 <= len(number) <= 16:
             return True
+        # Check surrounding context
+        ctx = message[max(0, pos - 60):pos].lower()
+        return any(w in ctx for w in [
+            "account", "a/c", "acc", "bank", "ifsc", "transfer", "neft", "rtgs",
+        ])
 
-        return False
+    # ── Link extraction ──
 
-    def _extract_urls(self, message: str) -> List[str]:
-        """Extract URLs and links from the message."""
-        urls = set()
+    def _extract_links(self, message: str) -> List[str]:
+        links = set()
 
-        # Extract full URLs
-        for match in self.PATTERNS["url"].finditer(message):
-            url = match.group(0)
-            # Clean trailing punctuation
-            url = url.rstrip(".,;:!?)")
-            urls.add(url)
+        for m in self._URL.finditer(message):
+            url = m.group(0).rstrip(".,;:!?)")
+            links.add(url)
 
-        # Extract short URLs
-        for match in self.PATTERNS["short_url"].finditer(message):
-            urls.add(match.group(0))
+        for m in self._SHORT_URL.finditer(message):
+            links.add(m.group(0))
 
-        return list(urls)
+        # Obfuscated: example[dot]com
+        for m in self._URL_OBFUSCATED.finditer(message):
+            full = m.group(0)
+            # Only if it looks like a domain, not normal text
+            tld = m.group(2).lower()
+            if tld in ("com", "in", "org", "net", "co", "io", "xyz", "tk", "ml", "info", "link"):
+                reconstructed = f"{m.group(1)}.{tld}"
+                if "/" in full:
+                    path = full.split("/", 1)[-1] if "/" in full else ""
+                    reconstructed += f"/{path}" if path else ""
+                links.add(reconstructed)
 
-    def _extract_keywords(self, message: str) -> List[str]:
-        """Extract suspicious keywords from the message."""
-        keywords = set()
-        message_lower = message.lower()
+        return list(links)
 
-        for keyword in self.all_keywords:
-            if keyword in message_lower:
-                keywords.add(keyword)
-
-        return list(keywords)
-
-    def extract_from_history(self, history: List[Dict]) -> IntelligenceData:
-        """
-        Extract intelligence from entire conversation history.
-
-        Args:
-            history: List of message dictionaries
-
-        Returns:
-            Combined IntelligenceData from all messages
-        """
-        combined = IntelligenceData()
-
-        for msg in history:
-            if msg.get("sender", "").lower() in ["scammer", "unknown"]:
-                text = msg.get("text", "")
-                if text:
-                    msg_intel = self.extract(text)
-                    combined.merge(msg_intel)
-
-        return combined
-
-    def get_ifsc_codes(self, message: str) -> List[str]:
-        """
-        Extract IFSC codes from message (for additional context).
-
-        Args:
-            message: Message text
-
-        Returns:
-            List of IFSC codes
-        """
-        codes = []
-        for match in self.PATTERNS["ifsc"].finditer(message):
-            code = match.group(1).upper()
-            codes.append(code)
-        return codes
+    # ── Email extraction ──
 
     def get_emails(self, message: str) -> List[str]:
-        """
-        Extract email addresses from message.
+        emails = set()
+        for m in self._EMAIL.finditer(message):
+            emails.add(m.group(0).lower())
+        for m in self._EMAIL_OBFUSCATED.finditer(message):
+            emails.add(f"{m.group(1)}@{m.group(2)}.{m.group(3)}".lower())
+        return list(emails)
 
-        Args:
-            message: Message text
+    # ── Money extraction ──
 
-        Returns:
-            List of email addresses
-        """
-        emails = []
-        for match in self.PATTERNS["email"].finditer(message):
-            emails.append(match.group(0))
-        return emails
+    def get_amounts(self, message: str) -> List[str]:
+        amounts = set()
+        for m in self._MONEY.finditer(message):
+            amounts.add(m.group(1).replace(",", ""))
+        for m in self._MONEY_REVERSE.finditer(message):
+            amounts.add(m.group(1).replace(",", ""))
+        return list(amounts)
+
+    # ── Keyword extraction ──
+
+    def _extract_keywords(self, message: str) -> List[str]:
+        msg_lower = message.lower()
+        return [kw for kw in self._all_keywords if kw in msg_lower]
+
+    # ── IFSC ──
+
+    def get_ifsc_codes(self, message: str) -> List[str]:
+        return [m.group(1).upper() for m in self._IFSC.finditer(message)]
+
+    # ── Batch extraction from conversation ──
+
+    def extract_from_history(self, history: List[Dict]) -> IntelligenceData:
+        combined = IntelligenceData()
+        for msg in history:
+            if msg.get("sender", "").lower() in ("scammer", "unknown"):
+                text = msg.get("text", "")
+                if text:
+                    combined.merge(self.extract(text))
+        return combined
 
 
-# Singleton instance
+# Singleton
 intelligence_extractor = IntelligenceExtractor()
 
 
 def extract_intelligence(message: str) -> IntelligenceData:
-    """
-    Convenience function to extract intelligence from a message.
-
-    Args:
-        message: Message text to analyze
-
-    Returns:
-        IntelligenceData object
-    """
+    """Extract intelligence from a single message."""
     return intelligence_extractor.extract(message)
 
 
 def extract_from_conversation(history: List[Dict]) -> IntelligenceData:
-    """
-    Convenience function to extract intelligence from conversation history.
-
-    Args:
-        history: List of message dictionaries
-
-    Returns:
-        Combined IntelligenceData
-    """
+    """Extract intelligence from conversation history."""
     return intelligence_extractor.extract_from_history(history)
