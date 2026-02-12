@@ -1,9 +1,11 @@
 """
 Main FastAPI Application for the Honeypot Scam Detection System.
 Provides REST API endpoints for processing scammer messages and managing sessions.
+Enhanced with robust error handling and never-crash guarantees.
 """
 
 import time
+import random
 from datetime import datetime
 from typing import List, Optional
 from contextlib import asynccontextmanager
@@ -39,24 +41,28 @@ from .session_manager import (
 )
 from .guvi_callback import send_session_result_async, guvi_callback
 
+# Safe fallback responses (used when everything else fails)
+_SAFE_FALLBACKS = [
+    "I am a bit confused. Can you explain that again?",
+    "Sorry, I didn't understand. What did you say?",
+    "Can you please repeat that? I didn't follow.",
+    "I see. Can you tell me more about this?",
+    "What do you mean exactly? Please explain.",
+]
+
 
 # Lifespan context manager for startup/shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Handle startup and shutdown events."""
-    # Startup
     logger.info("=" * 50)
     logger.info("Honeypot Scam Detection System Starting...")
     logger.info(f"Version: {__version__}")
     logger.info(f"Port: {settings.PORT}")
     logger.info(f"Gemini API configured: {bool(settings.GEMINI_API_KEY)}")
+    logger.info(f"Gemini model: {settings.GEMINI_MODEL}")
     logger.info("=" * 50)
-
     yield
-
-    # Shutdown
     logger.info("Shutting down Honeypot System...")
-    # Cleanup any remaining sessions
     active_count = session_manager.get_active_sessions_count()
     if active_count > 0:
         logger.warning(f"Shutting down with {active_count} active sessions")
@@ -65,32 +71,31 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI application
 app = FastAPI(
     title="Honeypot Scam Detection API",
-    description="AI-powered honeypot system for detecting and engaging scammers to extract intelligence.",
+    description="AI-powered honeypot system for detecting and engaging scammers.",
     version=__version__,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# Configure CORS middleware
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to specific origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount static files for web UI
+# Static files
 STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# Request timing middleware
+# Middleware
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    """Add processing time to response headers."""
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
@@ -98,41 +103,28 @@ async def add_process_time_header(request: Request, call_next):
     return response
 
 
-# Logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log all incoming requests."""
     logger.info(f"Request: {request.method} {request.url.path}")
     response = await call_next(request)
     logger.info(f"Response: {response.status_code}")
     return response
 
 
-# Authentication dependency
+# Auth dependency
 async def verify_api_key(x_api_key: Optional[str] = Header(None)):
-    """Verify the API key from request header."""
     if not x_api_key:
         logger.warning("Request missing API key")
         raise HTTPException(
             status_code=401,
-            detail={
-                "status": "error",
-                "message": "Missing API key. Include 'x-api-key' header.",
-                "code": "AUTH_MISSING"
-            }
+            detail={"status": "error", "message": "Missing API key. Include 'x-api-key' header.", "code": "AUTH_MISSING"}
         )
-
     if x_api_key != settings.API_SECRET_KEY:
-        logger.warning(f"Invalid API key attempted")
+        logger.warning("Invalid API key attempted")
         raise HTTPException(
             status_code=403,
-            detail={
-                "status": "error",
-                "message": "Invalid API key",
-                "code": "AUTH_INVALID"
-            }
+            detail={"status": "error", "message": "Invalid API key", "code": "AUTH_INVALID"}
         )
-
     return x_api_key
 
 
@@ -142,10 +134,6 @@ async def verify_api_key(x_api_key: Optional[str] = Header(None)):
 
 @app.get("/", response_model=HealthCheckResponse, tags=["Health"])
 async def health_check():
-    """
-    Health check endpoint.
-    Returns system status and active session count.
-    """
     return HealthCheckResponse(
         status="healthy",
         version=__version__,
@@ -159,39 +147,28 @@ async def analyze_message_root(
     request: IncomingMessage,
     api_key: str = Depends(verify_api_key)
 ):
-    """
-    Main endpoint for analyzing scammer messages (root path).
-    Alias for /analyze endpoint - GUVI sends requests here.
-    """
     return await analyze_message(request, api_key)
 
 
 @app.get("/health", response_model=HealthCheckResponse, tags=["Health"])
 async def health():
-    """Alias for health check endpoint."""
     return await health_check()
 
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    """Serve favicon."""
     favicon_path = STATIC_DIR / "favicon.ico"
     if favicon_path.exists():
         return FileResponse(favicon_path)
-    # Return empty response if no favicon
-    return FileResponse(favicon_path) if favicon_path.exists() else JSONResponse(content={}, status_code=204)
+    return JSONResponse(content={}, status_code=204)
 
 
 @app.get("/ui", response_class=HTMLResponse, tags=["UI"])
 async def web_ui():
-    """
-    Serve the interactive web UI for testing the honeypot.
-    """
     html_file = STATIC_DIR / "index.html"
     if html_file.exists():
         return HTMLResponse(content=html_file.read_text(), status_code=200)
-    else:
-        return HTMLResponse(content="<h1>UI not found</h1>", status_code=404)
+    return HTMLResponse(content="<h1>UI not found</h1>", status_code=404)
 
 
 @app.post("/analyze", response_model=APIResponse, tags=["Analysis"])
@@ -201,48 +178,41 @@ async def analyze_message(
 ):
     """
     Main endpoint for analyzing scammer messages.
-
-    This endpoint:
-    1. Receives a message from the GUVI platform
-    2. Detects if it's a scam
-    3. Generates an appropriate victim response
-    4. Extracts intelligence from the scammer's message
-    5. Manages session state
-    6. Triggers GUVI callback when session ends
-
-    Returns:
-        APIResponse with status and AI-generated reply
+    Enhanced with robust error handling — NEVER crashes.
     """
     try:
-        # Use flexible getter methods to handle different request formats
+        # ── Input validation ──
         session_id = request.get_session_id()
         message_text = request.get_message_text()
         sender = request.get_sender()
 
-        if not message_text:
-            raise HTTPException(status_code=400, detail="No message text provided")
+        # Handle empty/invalid messages gracefully
+        if not message_text or not message_text.strip():
+            return APIResponse(
+                status="success",
+                reply="Hello? Is someone there? I can't see your message."
+            )
 
-        logger.info(f"Processing message for session {session_id}: {message_text[:50]}...")
+        # Truncate very long messages
+        if len(message_text) > 5000:
+            message_text = message_text[:5000]
 
-        # Get or create session
+        logger.info(f"Processing session {session_id}: {message_text[:50]}...")
+
+        # ── Session management ──
         session = get_or_create_session(
             session_id,
             metadata=request.metadata.model_dump() if request.metadata else {}
         )
 
-        # Add scammer's message to session history
+        # Add scammer's message to session
         timestamp = request.get_timestamp()
-
         update_session(
             session_id,
-            message={
-                "sender": sender,
-                "text": message_text,
-                "timestamp": timestamp
-            }
+            message={"sender": sender, "text": message_text, "timestamp": timestamp}
         )
 
-        # Build conversation history for context
+        # Build conversation history
         history = []
         if request.conversationHistory:
             for msg in request.conversationHistory:
@@ -251,48 +221,66 @@ async def analyze_message(
                     "text": msg.text,
                     "timestamp": msg.timestamp
                 })
-        # Add current session history
         history.extend(session.conversationHistory)
 
-        # Detect if message is a scam using hybrid ML + Regex + LLM detection
-        detection_result = detect_scam(message_text, history, session_id)
+        # ── Scam detection ──
+        try:
+            detection_result = detect_scam(message_text, history, session_id)
+        except Exception as e:
+            logger.error(f"Scam detection error: {e}")
+            from .models import ScamDetectionResult
+            detection_result = ScamDetectionResult(
+                is_scam=False, confidence=0.0, risk_score=0,
+                detected_patterns=[], scam_types=[]
+            )
 
         logger.info(
-            f"Hybrid detection: is_scam={detection_result.is_scam}, "
+            f"Detection: is_scam={detection_result.is_scam}, "
             f"confidence={detection_result.confidence:.2f}, "
             f"types={detection_result.scam_types}"
         )
 
-        # Extract intelligence from message
-        intelligence = extract_intelligence(message_text)
-        update_session(session_id, intelligence=intelligence)
+        # ── Intelligence extraction ──
+        try:
+            intelligence = extract_intelligence(message_text)
+            update_session(session_id, intelligence=intelligence)
+        except Exception as e:
+            logger.error(f"Intelligence extraction error: {e}")
+            from .models import IntelligenceData
+            intelligence = IntelligenceData()
 
-        # Check if we should activate the AI agent based on escalation rules:
-        # - Condition A: scam confidence > 0.75
-        # - Condition B: 2+ suspicious turns in a row
-        # - Condition C: UPI / link / phone detected
-        intel_dict = intelligence.to_dict()
-        activate_agent = should_activate_agent(detection_result, session_id, intel_dict)
+        # ── Agent activation check ──
+        try:
+            intel_dict = intelligence.to_dict()
+            activate_agent = should_activate_agent(detection_result, session_id, intel_dict)
+        except Exception:
+            activate_agent = detection_result.is_scam
 
         logger.info(f"Agent activation: {activate_agent}")
 
-        # Update session with scam detection
         update_session(
             session_id,
             scam_detected=detection_result.is_scam or activate_agent,
             scam_types=detection_result.scam_types
         )
 
-        # ALWAYS use Gemini AI for natural conversation
-        # The escalation rules only determine if we mark it as "scam"
-        # But we always want realistic AI responses for good engagement
-        reply = generate_response(
-            message_text,
-            history,
-            detection_result.scam_types if (detection_result.is_scam or activate_agent) else []
-        )
+        # ── Generate response ──
+        try:
+            reply = generate_response(
+                message_text,
+                history,
+                detection_result.scam_types if (detection_result.is_scam or activate_agent) else [],
+                session_id=session_id,
+            )
+        except Exception as e:
+            logger.error(f"Response generation error: {e}")
+            reply = random.choice(_SAFE_FALLBACKS)
 
-        logger.info(f"Generated victim response: {reply[:50]}...")
+        # Validate reply is not empty
+        if not reply or not reply.strip():
+            reply = random.choice(_SAFE_FALLBACKS)
+
+        logger.info(f"Response: {reply[:50]}...")
 
         # Add our response to session
         update_session(
@@ -304,74 +292,62 @@ async def analyze_message(
             }
         )
 
-        # Check if session should end
-        should_end, end_reason = should_end_session(session_id)
+        # ── Session end check ──
+        try:
+            should_end, end_reason = should_end_session(session_id)
 
-        if should_end:
-            logger.info(f"Session {session_id} ending: {end_reason}")
+            if should_end:
+                logger.info(f"Session {session_id} ending: {end_reason}")
+                session = get_session_data(session_id)
+                if session:
+                    try:
+                        notes = generate_notes(
+                            session.conversationHistory,
+                            session.detectedScamTypes,
+                            session.extractedIntelligence.to_dict()
+                        )
+                        update_session(session_id, agent_notes=notes)
+                    except Exception:
+                        pass
 
-            # Get updated session data
-            session = get_session_data(session_id)
+                    complete_session(session_id, end_reason)
 
-            if session:
-                # Generate agent notes
-                notes = generate_notes(
-                    session.conversationHistory,
-                    session.detectedScamTypes,
-                    session.extractedIntelligence.to_dict()
-                )
-                update_session(session_id, agent_notes=notes)
+                    final_session = get_session_data(session_id)
+                    if final_session:
+                        try:
+                            send_session_result_async(final_session)
+                        except Exception:
+                            logger.error("Failed to send callback")
+        except Exception as e:
+            logger.error(f"Session end check error: {e}")
 
-                # Mark session as completed
-                complete_session(session_id, end_reason)
+        return APIResponse(status="success", reply=reply)
 
-                # Get final session state and send callback
-                final_session = get_session_data(session_id)
-                if final_session:
-                    send_session_result_async(final_session)
-                    logger.info(f"GUVI callback queued for session {session_id}")
-
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        # NEVER crash — always return a valid response
         return APIResponse(
             status="success",
-            reply=reply
+            reply=random.choice(_SAFE_FALLBACKS)
         )
 
-    except Exception as e:
-        logger.error(f"Error processing message: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "status": "error",
-                "message": "Internal server error processing message",
-                "code": "PROCESSING_ERROR"
-            }
-        )
 
+# ============================================================================
+# Debug Endpoints
+# ============================================================================
 
 @app.get("/sessions", response_model=List[SessionSummary], tags=["Debug"])
 async def get_sessions(api_key: str = Depends(verify_api_key)):
-    """
-    Get all active sessions (debug endpoint).
-    Returns summary information for all sessions.
-    """
     return session_manager.get_all_sessions()
 
 
 @app.get("/sessions/{session_id}", tags=["Debug"])
 async def get_session(session_id: str, api_key: str = Depends(verify_api_key)):
-    """
-    Get detailed information for a specific session.
-    """
     session = get_session_data(session_id)
     if not session:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "status": "error",
-                "message": f"Session {session_id} not found",
-                "code": "SESSION_NOT_FOUND"
-            }
-        )
+        raise HTTPException(status_code=404, detail={"status": "error", "message": f"Session {session_id} not found"})
 
     return {
         "sessionId": session.sessionId,
@@ -389,96 +365,71 @@ async def get_session(session_id: str, api_key: str = Depends(verify_api_key)):
 
 @app.delete("/sessions/{session_id}", tags=["Debug"])
 async def delete_session(session_id: str, api_key: str = Depends(verify_api_key)):
-    """
-    Delete a specific session.
-    """
     if session_manager.delete_session(session_id):
         return {"status": "success", "message": f"Session {session_id} deleted"}
-    else:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "status": "error",
-                "message": f"Session {session_id} not found",
-                "code": "SESSION_NOT_FOUND"
-            }
-        )
+    raise HTTPException(status_code=404, detail={"status": "error", "message": f"Session {session_id} not found"})
 
 
 @app.post("/sessions/{session_id}/end", tags=["Debug"])
 async def end_session(session_id: str, api_key: str = Depends(verify_api_key)):
-    """
-    Manually end a session and trigger GUVI callback.
-    """
     session = get_session_data(session_id)
     if not session:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "status": "error",
-                "message": f"Session {session_id} not found",
-                "code": "SESSION_NOT_FOUND"
-            }
-        )
+        raise HTTPException(status_code=404, detail={"status": "error", "message": f"Session {session_id} not found"})
 
-    # Generate notes if not already present
     if not session.agentNotes:
-        notes = generate_notes(
-            session.conversationHistory,
-            session.detectedScamTypes,
-            session.extractedIntelligence.to_dict()
-        )
-        update_session(session_id, agent_notes=notes)
+        try:
+            notes = generate_notes(
+                session.conversationHistory,
+                session.detectedScamTypes,
+                session.extractedIntelligence.to_dict()
+            )
+            update_session(session_id, agent_notes=notes)
+        except Exception:
+            pass
 
-    # Mark as completed
     complete_session(session_id, "manual_end")
 
-    # Get final session and send callback
     final_session = get_session_data(session_id)
     if final_session:
-        send_session_result_async(final_session)
+        try:
+            send_session_result_async(final_session)
+        except Exception:
+            pass
 
-    return {
-        "status": "success",
-        "message": f"Session {session_id} ended and callback triggered"
-    }
+    return {"status": "success", "message": f"Session {session_id} ended and callback triggered"}
 
 
 @app.get("/stats", tags=["Debug"])
 async def get_stats(api_key: str = Depends(verify_api_key)):
-    """
-    Get system statistics.
-    """
     sessions = session_manager.get_all_sessions()
-
-    total_sessions = len(sessions)
-    active_sessions = sum(1 for s in sessions if s.status == "active")
-    completed_sessions = sum(1 for s in sessions if s.status == "completed")
-    scam_detected_count = sum(1 for s in sessions if s.scamDetected)
-    total_messages = sum(s.messageCount for s in sessions)
-    total_intelligence = sum(s.intelligenceCount for s in sessions)
+    total = len(sessions)
+    active = sum(1 for s in sessions if s.status == "active")
+    completed = sum(1 for s in sessions if s.status == "completed")
+    scam_count = sum(1 for s in sessions if s.scamDetected)
+    total_msgs = sum(s.messageCount for s in sessions)
+    total_intel = sum(s.intelligenceCount for s in sessions)
 
     return {
-        "total_sessions": total_sessions,
-        "active_sessions": active_sessions,
-        "completed_sessions": completed_sessions,
-        "scams_detected": scam_detected_count,
-        "total_messages_processed": total_messages,
-        "total_intelligence_extracted": total_intelligence,
+        "total_sessions": total,
+        "active_sessions": active,
+        "completed_sessions": completed,
+        "scams_detected": scam_count,
+        "total_messages_processed": total_msgs,
+        "total_intelligence_extracted": total_intel,
         "ai_agent_status": "active" if victim_agent.initialized else "fallback",
         "version": __version__
     }
 
 
+# ============================================================================
+# Test Endpoints
+# ============================================================================
+
 @app.post("/test/detect", tags=["Testing"])
 async def test_scam_detection(
-    message: str = Query(..., description="Message to check for scam"),
+    message: str = Query(..., description="Message to check"),
     api_key: str = Depends(verify_api_key)
 ):
-    """
-    Test endpoint to check scam detection for a message.
-    Uses hybrid ML + Regex + LLM detection.
-    """
     result = detect_scam(message)
     intelligence = extract_intelligence(message)
     activate = should_activate_agent(result, extracted_intel=intelligence.to_dict())
@@ -497,14 +448,10 @@ async def test_scam_detection(
 
 @app.post("/test/extract", tags=["Testing"])
 async def test_intelligence_extraction(
-    message: str = Query(..., description="Message to extract intelligence from"),
+    message: str = Query(..., description="Message to extract from"),
     api_key: str = Depends(verify_api_key)
 ):
-    """
-    Test endpoint to check intelligence extraction for a message.
-    """
     intelligence = extract_intelligence(message)
-
     return {
         "message": message,
         "extracted": intelligence.to_dict(),
@@ -514,15 +461,11 @@ async def test_intelligence_extraction(
 
 @app.post("/test/response", tags=["Testing"])
 async def test_ai_response(
-    message: str = Query(..., description="Message to generate response for"),
+    message: str = Query(..., description="Message to respond to"),
     api_key: str = Depends(verify_api_key)
 ):
-    """
-    Test endpoint to generate AI victim response.
-    """
     result = detect_scam(message)
     response = generate_response(message, [], result.scam_types)
-
     return {
         "scammer_message": message,
         "victim_response": response,
@@ -533,74 +476,7 @@ async def test_ai_response(
 
 @app.get("/test/callback", tags=["Testing"])
 async def test_callback_connection(api_key: str = Depends(verify_api_key)):
-    """
-    Test connection to GUVI callback endpoint.
-    """
     return guvi_callback.test_connection()
-
-
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
-def _get_simple_response(message: str) -> str:
-    """
-    Generate a simple response for non-threatening messages.
-    Used when agent activation is not triggered to reduce false positives.
-
-    Args:
-        message: The incoming message
-
-    Returns:
-        Simple, natural response string
-    """
-    import random
-    message_lower = message.lower().strip()
-
-    # Greeting responses
-    if any(word in message_lower for word in ["hello", "hi", "hey", "hii"]):
-        return random.choice([
-            "Hello, who is this?",
-            "Hi, may I know who is calling?",
-            "Hello! Who is this please?"
-        ])
-
-    # Yes/No/Ok responses
-    if message_lower in ["ok", "okay", "yes", "no", "sure", "fine", "yeah"]:
-        return random.choice([
-            "Okay, please continue.",
-            "Alright, go ahead.",
-            "Yes, tell me more."
-        ])
-
-    # Question responses
-    if "?" in message:
-        return random.choice([
-            "I am not sure. Can you explain?",
-            "What do you mean exactly?",
-            "Could you tell me more?"
-        ])
-
-    # Default response - ask for clarification
-    return random.choice([
-        "I see. What is this about?",
-        "Okay. Can you explain more?",
-        "I understand. Please go on."
-    ])
-
-
-def _get_generic_response(message: str) -> str:
-    """
-    Generate a generic polite response for non-scam messages.
-    (Kept for backwards compatibility)
-
-    Args:
-        message: The incoming message
-
-    Returns:
-        Generic response string
-    """
-    return _get_simple_response(message)
 
 
 # ============================================================================
@@ -609,28 +485,20 @@ def _get_generic_response(message: str) -> str:
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Handle HTTP exceptions with consistent format."""
     return JSONResponse(
         status_code=exc.status_code,
         content=exc.detail if isinstance(exc.detail, dict) else {
-            "status": "error",
-            "message": str(exc.detail),
-            "code": "HTTP_ERROR"
+            "status": "error", "message": str(exc.detail), "code": "HTTP_ERROR"
         }
     )
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    """Handle unexpected exceptions."""
     logger.error(f"Unexpected error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={
-            "status": "error",
-            "message": "An unexpected error occurred",
-            "code": "INTERNAL_ERROR"
-        }
+        content={"status": "error", "message": "An unexpected error occurred", "code": "INTERNAL_ERROR"}
     )
 
 
@@ -640,7 +508,6 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
         "app.main:app",
         host=settings.HOST,

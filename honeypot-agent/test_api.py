@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 # Configuration
 BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-API_KEY = os.getenv("API_SECRET_KEY", "your_secret_api_key_for_authentication")
+API_KEY = os.getenv("API_SECRET_KEY", "my-super-secret-honeypot-key-2026")
 
 # Test session tracking
 test_results = {

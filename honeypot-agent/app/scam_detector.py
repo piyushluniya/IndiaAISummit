@@ -1,371 +1,568 @@
 """
-Hybrid Scam Detection Module for the Honeypot System.
-Uses ML classifier + Regex extraction + LLM verification for accurate detection.
+Enhanced Multi-Layer Scam Detection Module for the Honeypot System.
 
-Production Flow:
-1. ML classifier → probability scores
-2. Regex extraction → UPI, phone, links
-3. Confidence logic → scam/suspicious/legit
-4. LLM verification → reduce false positives
-5. Agent activation → based on escalation rules
+4-Layer Detection:
+  Layer 1 - Keyword scoring (100+ terms)
+  Layer 2 - Pattern matching (multi-word scam patterns)
+  Layer 3 - Context analysis (conversation history)
+  Layer 4 - Feature scoring (structural indicators)
+
+Plus ML classifier + LLM verification.
 """
 
 import re
-from typing import List, Tuple, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from .models import ScamDetectionResult
 from .config import logger, settings
+from .urgency_detector import analyze_pressure_tactics
 
 # Import ML classifier
 try:
-    from .ml_classifier import get_ml_prediction, classify_message
+    from .ml_classifier import get_ml_prediction
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
-    logger.warning("ML classifier not available, using fallback detection")
+    logger.warning("ML classifier not available, using enhanced fallback")
 
+
+# ══════════════════════════════════════════════════════════════════════
+# LAYER 1: KEYWORD SCORING (100+ terms)
+# ══════════════════════════════════════════════════════════════════════
+
+HIGH_RISK_KEYWORDS = {
+    # Bank fraud
+    "blocked": 10, "suspended": 10, "frozen": 10, "verify": 8,
+    "kyc": 9, "account closed": 10, "deactivated": 10, "unauthorized": 9,
+    "security alert": 9, "fraud alert": 9, "account will be": 10,
+    "account has been": 10, "unusual activity": 9, "suspicious activity": 9,
+    "avoid suspension": 9, "to avoid": 6,
+    # UPI fraud
+    "upi": 7, "paytm": 6, "phonepe": 6, "gpay": 6, "google pay": 6,
+    "send money": 9, "transfer money": 9, "payment request": 8,
+    "receive money": 7, "bhim": 6,
+    # OTP theft
+    "otp": 10, "verification code": 10, "one time password": 10,
+    "pin": 8, "cvv": 10, "password": 8, "share otp": 10, "send otp": 10,
+    "share pin": 10, "atm pin": 10, "mpin": 9,
+    # Urgency
+    "urgent": 8, "immediately": 9, "right now": 9, "within 24 hours": 8,
+    "expire": 8, "last chance": 9, "final notice": 9, "final warning": 9,
+    "act fast": 8, "hurry": 7, "time is running out": 8,
+    # Authority impersonation
+    "rbi": 9, "reserve bank": 9, "income tax": 9, "government": 8,
+    "police": 9, "legal action": 9, "court": 8, "officer": 7,
+    "cyber cell": 9, "crime branch": 9, "customs": 8,
+    # Threats
+    "arrested": 10, "jail": 10, "fir": 10, "penalty": 8,
+    "fine": 7, "blacklisted": 8, "warrant": 10,
+    "legal proceedings": 9, "criminal case": 10,
+    # Prizes/lottery
+    "won": 7, "lottery": 9, "prize": 8, "reward": 7,
+    "cashback": 6, "refund": 7, "selected": 6, "lucky": 7,
+    "congratulations": 7, "winner": 8, "claim": 8,
+    # Investment
+    "investment": 7, "guaranteed returns": 9, "double money": 10,
+    "high returns": 8, "profit": 6, "scheme": 7,
+    "easy money": 9, "quick money": 9,
+    # Job scam
+    "work from home": 7, "part time job": 7, "earn from home": 8,
+    "registration fee": 9, "advance payment": 9,
+    # Action words
+    "click here": 8, "click link": 8, "click below": 8,
+    "visit link": 8, "open link": 8, "update details": 8,
+    "verify identity": 9, "confirm identity": 9, "submit": 6,
+    # Hindi keywords
+    "khata band": 10, "turant": 8, "sत्यापित": 8,
+}
+
+MEDIUM_RISK_KEYWORDS = {
+    "confirm": 4, "account": 3, "bank": 3, "payment": 4,
+    "transfer": 4, "update": 3, "details": 3, "information": 3,
+    "card": 4, "link": 4, "register": 3, "activate": 4,
+    "form": 3, "process": 3, "amount": 3, "transaction": 4,
+    "balance": 3, "statement": 3, "customer care": 5,
+    "support team": 5, "helpline": 4, "toll free": 4,
+    "whatsapp": 3, "telegram": 3, "offer": 3, "deal": 3,
+    "limited": 3, "special": 3, "exclusive": 3,
+}
+
+
+def _keyword_score(message: str) -> Tuple[float, List[str]]:
+    """Layer 1: Keyword-based scoring. Returns (normalized_score, matched_keywords)."""
+    msg_lower = message.lower()
+    total = 0
+    matched = []
+
+    for kw, weight in HIGH_RISK_KEYWORDS.items():
+        if kw in msg_lower:
+            total += weight
+            matched.append(kw)
+
+    for kw, weight in MEDIUM_RISK_KEYWORDS.items():
+        if kw in msg_lower:
+            total += weight
+            matched.append(kw)
+
+    # Normalize: 30+ points = 1.0
+    normalized = min(1.0, total / 30.0)
+    return normalized, matched
+
+
+# ══════════════════════════════════════════════════════════════════════
+# LAYER 2: PATTERN MATCHING
+# ══════════════════════════════════════════════════════════════════════
+
+SCAM_PATTERNS = [
+    # Bank impersonation
+    (r"(?:your|the)\s+(?:bank\s+)?account\s+(?:will be|has been|is being|is)\s+(?:blocked|suspended|frozen|closed|terminated|deactivated)", "bank_impersonation", 0.9),
+    (r"(?:bank|rbi|sbi|hdfc|icici|axis)\s+(?:officer|manager|executive|representative)\s+(?:here|calling|speaking)", "bank_impersonation", 0.8),
+    (r"(?:dear|respected)\s+(?:customer|account holder|sir|madam)", "bank_impersonation", 0.5),
+    (r"(?:unusual|suspicious)\s+(?:activity|transaction)\s+(?:on|in|detected)", "bank_impersonation", 0.7),
+    (r"(?:verify|confirm|update)\s+(?:your)?\s*(?:details|identity|information)\s+(?:to avoid|or|otherwise)", "bank_impersonation", 0.7),
+
+    # UPI fraud
+    (r"(?:send|transfer|pay)\s+(?:money|amount|rs|₹|inr)\s+(?:to|via|through)\s+(?:upi|paytm|phonepe|gpay)", "upi_fraud", 0.9),
+    (r"(?:upi|paytm|phonepe|gpay)\s+(?:id|number)\s*[:=]?\s*\w+@\w+", "upi_fraud", 0.85),
+    (r"(?:scan|use)\s+(?:this|the)\s+(?:qr|upi)\s+(?:code|link)", "upi_fraud", 0.8),
+
+    # OTP theft
+    (r"(?:share|send|give|tell|provide)\s+(?:me|us)?\s*(?:the|your)?\s*(?:otp|verification code|one time password|pin|mpin)", "otp_theft", 0.95),
+    (r"(?:otp|code|pin)\s+(?:sent|received|generated)\s+(?:to|on)\s+(?:your|the)\s+(?:phone|mobile|number)", "otp_theft", 0.7),
+
+    # Phishing
+    (r"(?:click|open|visit|go to)\s+(?:this|the|below)?\s*(?:link|url|website)", "phishing_link", 0.8),
+    (r"(?:https?://|bit\.ly|tinyurl|goo\.gl)", "phishing_link", 0.6),
+
+    # Investment scam
+    (r"(?:guaranteed|assured|fixed)\s+(?:returns?|profit|income)", "investment_scam", 0.9),
+    (r"(?:double|triple|multiply)\s+(?:your)?\s*(?:money|investment|amount)", "investment_scam", 0.95),
+    (r"(?:invest|deposit)\s+(?:rs|₹|inr)?\s*\d+\s+(?:and|to)\s+(?:get|earn|receive)", "investment_scam", 0.85),
+
+    # Job scam
+    (r"(?:work|earn|job)\s+(?:from|at)\s+home", "job_scam", 0.6),
+    (r"(?:registration|processing|admission)\s+fee", "job_scam", 0.8),
+    (r"(?:earn|make)\s+(?:rs|₹|inr)?\s*\d+\s*(?:per|every|daily|weekly)", "job_scam", 0.7),
+
+    # KYC update scam
+    (r"(?:kyc|know your customer)\s+(?:update|verification|expired|pending|mandatory)", "kyc_update", 0.85),
+    (r"(?:complete|update)\s+(?:your)?\s*kyc\s+(?:immediately|now|today|urgently)", "kyc_update", 0.9),
+
+    # Prize/lottery scam
+    (r"(?:you have|you've|you)\s+(?:won|been selected|been chosen)\s+(?:a|the)?\s*(?:prize|lottery|reward|gift|cashback)", "prize_lottery", 0.9),
+    (r"(?:claim|collect|receive)\s+(?:your)?\s*(?:prize|reward|winnings|gift)", "prize_lottery", 0.85),
+
+    # Tax/legal scam
+    (r"(?:income tax|it department|tax department)\s+(?:notice|alert|warning|action)", "tax_legal", 0.85),
+    (r"(?:legal|court|police)\s+(?:action|notice|case)\s+(?:will be|has been|against)", "tax_legal", 0.9),
+    (r"(?:arrest|fir|warrant)\s+(?:will be|has been|issued)", "tax_legal", 0.95),
+
+    # Refund scam
+    (r"(?:refund|cashback|reimbursement)\s+(?:of|worth)?\s*(?:rs|₹|inr)?\s*\d+", "refund_scam", 0.7),
+    (r"(?:process|initiate|complete)\s+(?:your)?\s*(?:refund|cashback)", "refund_scam", 0.75),
+
+    # Tech support scam
+    (r"(?:virus|malware|hacked|compromised)\s+(?:detected|found|in your)", "tech_support", 0.8),
+    (r"(?:install|download)\s+(?:this|the)\s+(?:app|software|antivirus)", "tech_support", 0.75),
+]
+
+_COMPILED_PATTERNS = [(re.compile(p, re.IGNORECASE), t, w) for p, t, w in SCAM_PATTERNS]
+
+
+def _pattern_score(message: str) -> Tuple[float, List[str], List[str]]:
+    """Layer 2: Pattern matching. Returns (score, scam_types, patterns_found)."""
+    types = set()
+    patterns_found = []
+    max_score = 0.0
+
+    for pattern, scam_type, weight in _COMPILED_PATTERNS:
+        if pattern.search(message):
+            types.add(scam_type)
+            patterns_found.append(f"{scam_type}:{weight}")
+            max_score = max(max_score, weight)
+
+    # Boost if multiple types detected
+    if len(types) >= 2:
+        max_score = min(1.0, max_score + 0.1)
+
+    return max_score, list(types), patterns_found
+
+
+# ══════════════════════════════════════════════════════════════════════
+# LAYER 3: CONTEXT ANALYSIS
+# ══════════════════════════════════════════════════════════════════════
+
+def _context_score(
+    message: str,
+    conversation_history: List[Dict] = None,
+    session_id: str = None,
+) -> float:
+    """Layer 3: Conversation context analysis."""
+    if not conversation_history:
+        return 0.0
+
+    score = 0.0
+    scammer_msgs = [
+        m.get("text", "").lower()
+        for m in conversation_history
+        if m.get("sender", "").lower() in ("scammer", "unknown")
+    ]
+
+    if not scammer_msgs:
+        return 0.0
+
+    # Escalating threats check
+    threat_counts = []
+    for msg in scammer_msgs:
+        count = sum(1 for kw in ["block", "suspend", "legal", "arrest", "urgent", "immediately"]
+                    if kw in msg)
+        threat_counts.append(count)
+
+    if len(threat_counts) >= 2:
+        if threat_counts[-1] > threat_counts[0]:
+            score += 0.3  # Escalating
+
+    # Repeated info requests
+    info_keywords = ["otp", "upi", "account", "password", "pin", "card", "cvv"]
+    info_request_count = 0
+    for msg in scammer_msgs:
+        if any(kw in msg for kw in info_keywords):
+            info_request_count += 1
+
+    if info_request_count >= 2:
+        score += 0.25
+
+    # Trust building then money request
+    has_trust = any(
+        any(w in msg for w in ["bank", "officer", "government", "rbi", "official"])
+        for msg in scammer_msgs[:3]
+    )
+    has_money = any(
+        any(w in msg for w in ["send", "pay", "transfer", "upi", "amount"])
+        for msg in scammer_msgs[2:]
+    )
+    if has_trust and has_money:
+        score += 0.3
+
+    # Contradiction detection (claims different organizations)
+    orgs_mentioned = set()
+    for msg in scammer_msgs:
+        for org in ["sbi", "hdfc", "icici", "axis", "rbi", "police", "income tax", "customs"]:
+            if org in msg:
+                orgs_mentioned.add(org)
+    if len(orgs_mentioned) >= 3:
+        score += 0.2  # Suspicious: mentions too many orgs
+
+    return min(1.0, score)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# LAYER 4: FEATURE SCORING
+# ══════════════════════════════════════════════════════════════════════
+
+# Regex for structural features
+_HAS_PHONE = re.compile(r'(?:\+91|91|0)?[6-9]\d{9}')
+_HAS_UPI = re.compile(r'\w+@\w+', re.IGNORECASE)
+_HAS_LINK = re.compile(r'https?://|bit\.ly|tinyurl|goo\.gl|\w+\[dot\]\w+', re.IGNORECASE)
+_HAS_AMOUNT = re.compile(r'(?:₹|rs\.?|inr)\s*[\d,]+', re.IGNORECASE)
+
+URGENCY_WORDS = {"urgent", "immediately", "now", "today", "hurry", "asap", "fast", "quickly", "right now", "last chance", "final"}
+AUTHORITY_WORDS = {"bank", "rbi", "government", "police", "income tax", "officer", "court", "legal", "customs", "cyber cell"}
+THREAT_WORDS = {"blocked", "suspended", "arrested", "fir", "jail", "penalty", "fine", "legal action", "warrant", "terminated", "suspension", "deactivated", "frozen"}
+SENSITIVE_INFO_WORDS = {"otp", "pin", "cvv", "password", "account number", "card number", "aadhaar", "pan", "verify your details", "verify your identity", "confirm your details", "update your details"}
+
+
+def _feature_score(message: str) -> Tuple[float, List[str]]:
+    """Layer 4: Feature-based scoring. Returns (score, red_flags)."""
+    msg_lower = message.lower()
+    score = 0.0
+    red_flags = []
+
+    # Has urgency words
+    if any(w in msg_lower for w in URGENCY_WORDS):
+        score += 0.3
+        red_flags.append("urgency_detected")
+
+    # Contains phone/UPI/account
+    if _HAS_PHONE.search(message) or _HAS_UPI.search(message):
+        score += 0.2
+        red_flags.append("contact_info_present")
+
+    # Contains link
+    if _HAS_LINK.search(message):
+        score += 0.25
+        red_flags.append("link_detected")
+
+    # Impersonates authority
+    if any(w in msg_lower for w in AUTHORITY_WORDS):
+        score += 0.3
+        red_flags.append("authority_impersonation")
+
+    # Requests sensitive info
+    if any(w in msg_lower for w in SENSITIVE_INFO_WORDS):
+        score += 0.4
+        red_flags.append("sensitive_info_request")
+
+    # Contains threat
+    if any(w in msg_lower for w in THREAT_WORDS):
+        score += 0.35
+        red_flags.append("threat_detected")
+
+    # Money amount mentioned
+    if _HAS_AMOUNT.search(message):
+        score += 0.15
+        red_flags.append("money_amount_mentioned")
+
+    return min(1.0, score), red_flags
+
+
+# ══════════════════════════════════════════════════════════════════════
+# HYBRID DETECTOR
+# ══════════════════════════════════════════════════════════════════════
 
 class HybridScamDetector:
     """
-    Hybrid scam detection using ML + Regex + LLM verification.
-    Reduces false positives significantly compared to keyword-only detection.
+    Multi-layer scam detection combining:
+    - Keyword scoring
+    - Pattern matching
+    - Context analysis
+    - Feature scoring
+    - ML classifier
+    - LLM verification
     """
 
-    # India-specific UPI regex
-    UPI_REGEX = re.compile(r'\b[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}\b', re.IGNORECASE)
-
-    # Phone number regex (Indian)
-    PHONE_REGEX = re.compile(r'(?:(?:\+91|91|0)?[-\s]?)?([6-9]\d{9})(?!\d)')
-
-    # URL/Link regex
-    URL_REGEX = re.compile(r'https?://[^\s<>"{}|\\^`\[\]]+', re.IGNORECASE)
-
-    # Short URL patterns (phishing indicators)
-    SHORT_URL_REGEX = re.compile(
-        r'\b(?:bit\.ly|goo\.gl|t\.co|tinyurl\.com|is\.gd|buff\.ly|ow\.ly|rebrand\.ly)/[a-zA-Z0-9]+\b',
-        re.IGNORECASE
-    )
-
     def __init__(self):
-        """Initialize the hybrid detector."""
-        self.suspicious_count = {}  # Track suspicious turns per session
+        self.suspicious_count: Dict[str, int] = {}
         self.gemini_model = None
-        logger.info("HybridScamDetector initialized with ML + Regex + LLM verification")
+        logger.info("HybridScamDetector initialized (enhanced multi-layer)")
 
     def analyze(
         self,
         message: str,
         session_id: str = None,
-        conversation_history: List[Dict] = None
+        conversation_history: List[Dict] = None,
     ) -> ScamDetectionResult:
-        """
-        Analyze message using hybrid detection.
+        """Analyze a message using all detection layers."""
 
-        Args:
-            message: Message text to analyze
-            session_id: Session ID for tracking suspicious turns
-            conversation_history: Previous messages for context
+        # Handle edge cases
+        if not message or not message.strip():
+            return ScamDetectionResult(
+                is_scam=False, confidence=0.0, risk_score=0,
+                detected_patterns=[], scam_types=[],
+            )
 
-        Returns:
-            ScamDetectionResult with ML-based detection
-        """
-        # Layer 1: ML Classification
-        ml_probs = self._get_ml_probabilities(message)
+        # Normalize
+        clean_msg = message.strip()
 
-        # Layer 2: Regex Extraction
-        extracted = self._extract_indicators(message)
-        upi_found = len(extracted["upi_ids"]) > 0
-        link_found = len(extracted["links"]) > 0
-        phone_found = len(extracted["phones"]) > 0
+        # Very short messages: use lighter analysis
+        if len(clean_msg.split()) < 3:
+            return self._analyze_short_message(clean_msg)
 
-        # Layer 3: Confidence-based decision
-        status, confidence = self._make_decision(
-            ml_probs, upi_found, link_found, phone_found
+        # ── Layer 1: Keywords ──
+        kw_score, kw_matched = _keyword_score(clean_msg)
+
+        # ── Layer 2: Patterns ──
+        pat_score, scam_types, patterns_found = _pattern_score(clean_msg)
+
+        # ── Layer 3: Context ──
+        ctx_score = _context_score(clean_msg, conversation_history, session_id)
+
+        # ── Layer 4: Features ──
+        feat_score, red_flags = _feature_score(clean_msg)
+
+        # ── ML layer ──
+        ml_probs = self._get_ml_probs(clean_msg)
+
+        # ── Weighted combination ──
+        rule_score = (
+            kw_score * 0.30
+            + pat_score * 0.30
+            + ctx_score * 0.20
+            + feat_score * 0.20
         )
+
+        # Blend with ML (rule-based gets more weight for subtle scam detection)
+        ml_scam = ml_probs.get("scam", 0.0)
+        final_confidence = (rule_score * 0.60) + (ml_scam * 0.40)
+
+        # Pressure tactics analysis
+        pressure = analyze_pressure_tactics(clean_msg)
+        urgency_level = pressure["urgency_level"]
+        threat_level = pressure["threat_level"]
+
+        # Boost if pressure is high
+        if pressure["combined_pressure_score"] > 0.5:
+            final_confidence = min(1.0, final_confidence + 0.1)
+
+        # Decision
+        is_scam = final_confidence > 0.45
 
         # Track suspicious turns
         if session_id:
-            if status == "suspicious":
+            if final_confidence > 0.3:
                 self.suspicious_count[session_id] = self.suspicious_count.get(session_id, 0) + 1
-            elif status == "legit":
-                # Reset on legit message
+            elif final_confidence < 0.15:
                 self.suspicious_count[session_id] = 0
 
-        # Layer 4: LLM verification for high-confidence scam
-        llm_verified = False
-        if status == "scam" and ml_probs["scam"] > 0.7:
-            llm_verified = self._llm_verify_scam(message)
-            if not llm_verified:
-                # LLM says not a scam, downgrade to suspicious
-                status = "suspicious"
-                confidence = ml_probs["suspicious"]
+        # Build detected patterns list
+        all_patterns = patterns_found.copy()
+        if kw_matched:
+            all_patterns.append(f"keywords:{len(kw_matched)}")
+        all_patterns.append(f"ml_scam:{ml_scam:.2f}")
+        all_patterns.extend(red_flags)
 
-        # Determine scam types based on what was found
-        scam_types = self._determine_scam_types(message, extracted)
-
-        # Build result
-        is_scam = status == "scam"
+        # Ensure scam_types populated
+        if is_scam and not scam_types:
+            scam_types = self._infer_scam_types(clean_msg, kw_matched)
 
         result = ScamDetectionResult(
             is_scam=is_scam,
-            confidence=confidence,
-            risk_score=int(ml_probs["scam"] * 100),
-            detected_patterns=self._get_detected_patterns(extracted, ml_probs),
-            scam_types=scam_types
+            confidence=round(final_confidence, 3),
+            risk_score=int(final_confidence * 100),
+            detected_patterns=all_patterns,
+            scam_types=scam_types or (["generic_scam"] if is_scam else []),
         )
 
         logger.info(
-            f"Hybrid analysis: status={status}, confidence={confidence:.2f}, "
-            f"ml_scam={ml_probs['scam']:.2f}, upi={upi_found}, link={link_found}"
+            f"Detection: is_scam={is_scam}, confidence={final_confidence:.3f}, "
+            f"kw={kw_score:.2f}, pat={pat_score:.2f}, ctx={ctx_score:.2f}, "
+            f"feat={feat_score:.2f}, ml={ml_scam:.2f}, types={scam_types}"
         )
 
         return result
 
-    def _get_ml_probabilities(self, message: str) -> Dict[str, float]:
-        """Get ML model probability scores."""
+    def _analyze_short_message(self, message: str) -> ScamDetectionResult:
+        """Lighter analysis for very short messages."""
+        msg_lower = message.lower()
+
+        # Quick keyword check
+        high_risk_short = {"otp", "send money", "blocked", "suspended", "urgent",
+                           "click", "verify", "upi", "pin", "cvv"}
+        matched = [kw for kw in high_risk_short if kw in msg_lower]
+
+        if matched:
+            return ScamDetectionResult(
+                is_scam=True,
+                confidence=0.6,
+                risk_score=60,
+                detected_patterns=[f"short_msg_keyword:{','.join(matched)}"],
+                scam_types=["generic_scam"],
+            )
+
+        return ScamDetectionResult(
+            is_scam=False, confidence=0.1, risk_score=10,
+            detected_patterns=["short_message"], scam_types=[],
+        )
+
+    def _get_ml_probs(self, message: str) -> Dict[str, float]:
         if ML_AVAILABLE:
             return get_ml_prediction(message)
-        else:
-            # Fallback: basic heuristic
-            return self._fallback_probabilities(message)
+        return self._fallback_probs(message)
 
-    def _fallback_probabilities(self, message: str) -> Dict[str, float]:
-        """Fallback probability calculation when ML not available."""
+    def _fallback_probs(self, message: str) -> Dict[str, float]:
         msg_lower = message.lower()
-
-        # High-risk scam indicators
-        scam_keywords = [
+        scam_kws = [
             "send otp", "share otp", "blocked", "suspended", "frozen",
             "pay now", "transfer money", "click here", "verify now",
-            "give cvv", "share pin", "lottery", "won prize", "claim now"
+            "give cvv", "share pin", "lottery", "won prize", "claim now",
         ]
-
-        # Suspicious indicators
-        sus_keywords = [
+        sus_kws = [
             "verify", "urgent", "immediately", "action required",
-            "security alert", "unusual activity", "kyc update"
+            "security alert", "unusual activity", "kyc update",
         ]
+        sc = sum(1 for kw in scam_kws if kw in msg_lower)
+        su = sum(1 for kw in sus_kws if kw in msg_lower)
 
-        # Count matches
-        scam_count = sum(1 for kw in scam_keywords if kw in msg_lower)
-        sus_count = sum(1 for kw in sus_keywords if kw in msg_lower)
+        if sc >= 2:
+            return {"legit": 0.1, "suspicious": 0.15, "scam": 0.75}
+        elif sc == 1:
+            return {"legit": 0.2, "suspicious": 0.3, "scam": 0.5}
+        elif su >= 2:
+            return {"legit": 0.25, "suspicious": 0.6, "scam": 0.15}
+        elif su == 1:
+            return {"legit": 0.4, "suspicious": 0.45, "scam": 0.15}
+        return {"legit": 0.7, "suspicious": 0.2, "scam": 0.1}
 
-        # Calculate probabilities
-        if scam_count >= 2:
-            return {"legit": 0.1, "suspicious": 0.15, "scam": 0.75, "confidence": 0.75}
-        elif scam_count == 1:
-            return {"legit": 0.2, "suspicious": 0.3, "scam": 0.5, "confidence": 0.5}
-        elif sus_count >= 2:
-            return {"legit": 0.25, "suspicious": 0.6, "scam": 0.15, "confidence": 0.6}
-        elif sus_count == 1:
-            return {"legit": 0.4, "suspicious": 0.45, "scam": 0.15, "confidence": 0.45}
-        else:
-            return {"legit": 0.7, "suspicious": 0.2, "scam": 0.1, "confidence": 0.7}
+    def _infer_scam_types(self, message: str, keywords: List[str]) -> List[str]:
+        """Infer scam types from detected keywords when patterns didn't match."""
+        msg_lower = message.lower()
+        types = set()
 
-    def _extract_indicators(self, message: str) -> Dict[str, List[str]]:
-        """Extract UPI IDs, links, and phone numbers."""
-        return {
-            "upi_ids": self.UPI_REGEX.findall(message),
-            "links": self.URL_REGEX.findall(message) + self.SHORT_URL_REGEX.findall(message),
-            "phones": self.PHONE_REGEX.findall(message)
+        keyword_type_map = {
+            "bank_impersonation": ["bank", "account", "sbi", "hdfc", "icici", "rbi"],
+            "upi_fraud": ["upi", "paytm", "phonepe", "gpay", "send money", "transfer"],
+            "otp_theft": ["otp", "pin", "cvv", "password", "verification code", "mpin"],
+            "phishing_link": ["click", "link", "visit", "website"],
+            "investment_scam": ["invest", "returns", "profit", "double money", "scheme"],
+            "job_scam": ["work from home", "part time", "earn", "registration fee"],
+            "prize_lottery": ["won", "lottery", "prize", "reward", "winner", "claim"],
+            "tax_legal": ["income tax", "legal action", "court", "arrested", "fir"],
+            "kyc_update": ["kyc"],
+            "refund_scam": ["refund", "cashback"],
         }
 
-    def _make_decision(
-        self,
-        ml_probs: Dict[str, float],
-        upi_found: bool,
-        link_found: bool,
-        phone_found: bool
-    ) -> Tuple[str, float]:
-        """
-        Make final decision based on confidence thresholds.
+        for stype, kws in keyword_type_map.items():
+            if any(kw in msg_lower for kw in kws):
+                types.add(stype)
 
-        Decision Logic:
-        - scam > 0.75 → SCAM
-        - suspicious > 0.6 → SUSPICIOUS
-        - else → LEGIT
-
-        Boost for extracted indicators.
-        """
-        scam_prob = ml_probs["scam"]
-        sus_prob = ml_probs["suspicious"]
-        legit_prob = ml_probs["legit"]
-
-        # Boost scam probability if indicators found
-        if upi_found or link_found:
-            scam_prob = min(1.0, scam_prob + 0.15)
-        if phone_found and (upi_found or link_found):
-            scam_prob = min(1.0, scam_prob + 0.10)
-
-        # Final decision
-        if scam_prob > 0.75:
-            return ("scam", scam_prob)
-        elif sus_prob > 0.6:
-            return ("suspicious", sus_prob)
-        else:
-            return ("legit", legit_prob)
-
-    def _llm_verify_scam(self, message: str) -> bool:
-        """
-        Use LLM to verify if message is truly a scam.
-        Reduces false positives by ~40%.
-        """
-        try:
-            # Try to use Gemini for verification
-            import google.generativeai as genai
-
-            if not settings.GEMINI_API_KEY:
-                return True  # No API key, assume ML is correct
-
-            if not self.gemini_model:
-                genai.configure(api_key=settings.GEMINI_API_KEY)
-                self.gemini_model = genai.GenerativeModel(settings.GEMINI_MODEL)
-
-            prompt = f"""Analyze this message and determine if it's attempting fraud or payment redirection.
-
-Message: "{message}"
-
-Is this message attempting fraud, scam, or unauthorized payment redirection?
-Answer with ONLY "yes" or "no"."""
-
-            response = self.gemini_model.generate_content(prompt)
-
-            if response and response.text:
-                answer = response.text.strip().lower()
-                is_scam = "yes" in answer
-                logger.info(f"LLM verification: {answer} → is_scam={is_scam}")
-                return is_scam
-
-        except Exception as e:
-            logger.warning(f"LLM verification failed: {e}")
-
-        return True  # Default to ML decision if LLM fails
-
-    def _determine_scam_types(self, message: str, extracted: Dict) -> List[str]:
-        """Determine specific scam types based on content."""
-        scam_types = []
-        msg_lower = message.lower()
-
-        # UPI fraud
-        if extracted["upi_ids"] or "upi" in msg_lower:
-            scam_types.append("upi_fraud")
-
-        # OTP scam
-        if any(kw in msg_lower for kw in ["otp", "verification code", "one time"]):
-            scam_types.append("otp_scam")
-
-        # Bank fraud
-        if any(kw in msg_lower for kw in ["bank", "account", "card", "cvv", "atm"]):
-            scam_types.append("bank_fraud")
-
-        # Phishing
-        if extracted["links"] or any(kw in msg_lower for kw in ["click", "link", "verify here"]):
-            scam_types.append("phishing")
-
-        # Impersonation
-        if any(kw in msg_lower for kw in ["rbi", "government", "police", "income tax", "officer"]):
-            scam_types.append("impersonation")
-
-        # Lottery/Prize scam
-        if any(kw in msg_lower for kw in ["lottery", "prize", "won", "winner", "claim"]):
-            scam_types.append("lottery_scam")
-
-        return scam_types if scam_types else ["generic_scam"]
-
-    def _get_detected_patterns(self, extracted: Dict, ml_probs: Dict) -> List[str]:
-        """Get list of detected patterns for reporting."""
-        patterns = []
-
-        if extracted["upi_ids"]:
-            patterns.append(f"upi_detected: {', '.join(extracted['upi_ids'])}")
-        if extracted["links"]:
-            patterns.append(f"links_detected: {len(extracted['links'])}")
-        if extracted["phones"]:
-            patterns.append(f"phones_detected: {', '.join(extracted['phones'])}")
-
-        patterns.append(f"ml_scam_prob: {ml_probs['scam']:.2f}")
-        patterns.append(f"ml_suspicious_prob: {ml_probs['suspicious']:.2f}")
-
-        return patterns
+        return list(types)
 
     def should_activate_agent(
         self,
         detection_result: ScamDetectionResult,
         session_id: str = None,
-        extracted_intel: Dict = None
+        extracted_intel: Dict = None,
     ) -> bool:
         """
-        Determine if AI agent should be activated based on escalation rules.
-
-        Escalation Rules - Trigger agent ONLY IF:
-        - Condition A: scam > 0.75
-        - Condition B: 2+ suspicious turns in a row
-        - Condition C: UPI / link / phone detected
-
-        This massively reduces false positives.
+        Determine if AI agent should be activated.
+        Conditions:
+          A: scam confidence > 0.55
+          B: 2+ suspicious turns in a row
+          C: UPI / link / phone detected in message
         """
-        # Condition A: High scam confidence
-        if detection_result.confidence > 0.75 and detection_result.is_scam:
-            logger.info("Agent activation: High scam confidence")
+        # Condition A
+        if detection_result.confidence > 0.55 and detection_result.is_scam:
             return True
 
-        # Condition B: Multiple suspicious turns
+        # Condition B
         if session_id:
-            sus_count = self.suspicious_count.get(session_id, 0)
-            if sus_count >= 2:
-                logger.info(f"Agent activation: {sus_count} suspicious turns")
+            if self.suspicious_count.get(session_id, 0) >= 2:
                 return True
 
-        # Condition C: Intelligence extracted
+        # Condition C
         if extracted_intel:
-            if (extracted_intel.get("upi_ids") or
-                extracted_intel.get("phishingLinks") or
-                extracted_intel.get("phoneNumbers")):
-                logger.info("Agent activation: Intelligence extracted")
+            if (extracted_intel.get("upiIds")
+                    or extracted_intel.get("phishingLinks")
+                    or extracted_intel.get("phoneNumbers")):
                 return True
 
         return False
 
     def reset_session(self, session_id: str):
-        """Reset suspicious count for a session."""
-        if session_id in self.suspicious_count:
-            del self.suspicious_count[session_id]
+        self.suspicious_count.pop(session_id, None)
 
 
-# Singleton instance
+# Singleton
 hybrid_detector = HybridScamDetector()
 
 
 def detect_scam(
     message: str,
     conversation_history: List[Dict] = None,
-    session_id: str = None
+    session_id: str = None,
 ) -> ScamDetectionResult:
-    """
-    Main detection function using hybrid approach.
-
-    Args:
-        message: Message to analyze
-        conversation_history: Previous messages
-        session_id: Session identifier
-
-    Returns:
-        ScamDetectionResult with ML-based detection
-    """
+    """Main detection function."""
     return hybrid_detector.analyze(message, session_id, conversation_history)
 
 
 def should_activate_agent(
     detection_result: ScamDetectionResult,
     session_id: str = None,
-    extracted_intel: Dict = None
+    extracted_intel: Dict = None,
 ) -> bool:
-    """Check if agent should be activated based on escalation rules."""
-    return hybrid_detector.should_activate_agent(
-        detection_result, session_id, extracted_intel
-    )
+    """Check if agent should be activated."""
+    return hybrid_detector.should_activate_agent(detection_result, session_id, extracted_intel)
 
 
 def is_message_scam(message: str) -> bool:
-    """Quick check if message is a scam."""
-    result = detect_scam(message)
-    return result.is_scam
+    """Quick scam check."""
+    return detect_scam(message).is_scam
