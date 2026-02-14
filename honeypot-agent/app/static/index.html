@@ -3,403 +3,792 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Honeypot Scam Detection - Interactive Test</title>
+    <title>IntelliBait — AI-Powered Scam Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
+        *, *::before, *::after {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
+        :root {
+            --bg-deep: #0f172a;
+            --bg-surface: #1e293b;
+            --bg-elevated: #334155;
+            --glass: rgba(30, 41, 59, 0.6);
+            --glass-border: rgba(148, 163, 184, 0.12);
+            --accent: #06b6d4;
+            --accent-glow: rgba(6, 182, 212, 0.25);
+            --accent-soft: rgba(6, 182, 212, 0.1);
+            --green: #10b981;
+            --green-soft: rgba(16, 185, 129, 0.15);
+            --red: #ef4444;
+            --red-soft: rgba(239, 68, 68, 0.15);
+            --yellow: #f59e0b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+            --radius-full: 9999px;
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-deep);
             min-height: 100vh;
-            color: #fff;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            display: grid;
-            grid-template-columns: 1fr 350px;
-            gap: 20px;
-            height: 100vh;
-        }
-
-        .chat-section {
-            display: flex;
-            flex-direction: column;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 20px;
+            color: var(--text-primary);
             overflow: hidden;
         }
 
-        .chat-header {
-            background: linear-gradient(90deg, #e94560 0%, #ff6b6b 100%);
-            padding: 20px;
-            text-align: center;
+        /* Background pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse at 20% 50%, rgba(6, 182, 212, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 80%, rgba(6, 182, 212, 0.04) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
         }
 
-        .chat-header h1 {
-            font-size: 1.5rem;
-            margin-bottom: 5px;
+        .app {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
         }
 
-        .chat-header p {
-            font-size: 0.9rem;
-            opacity: 0.9;
+        /* ── Top bar ── */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 24px;
+            background: var(--glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--glass-border);
         }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: -1px;
+        }
+
+        .brand-text h1 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .brand-text span {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .session-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: var(--accent-soft);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            border-radius: var(--radius-full);
+            font-size: 0.75rem;
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .session-pill .dot {
+            width: 6px;
+            height: 6px;
+            background: var(--green);
+            border-radius: 50%;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .btn-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--glass-border);
+            background: var(--glass);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+        }
+
+        .btn-icon:hover {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+
+        /* ── Main layout ── */
+        .main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 0;
+            overflow: hidden;
+        }
+
+        /* ── Chat section ── */
+        .chat-section {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-right: 1px solid var(--glass-border);
+        }
+
+        /* banner removed */
 
         .chat-messages {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
+            padding: 24px;
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 16px;
+            scroll-behavior: smooth;
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.3) 0%, rgba(15, 23, 42, 0) 100%);
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: var(--bg-elevated);
+            border-radius: 4px;
         }
 
         .message {
-            max-width: 80%;
-            padding: 12px 18px;
-            border-radius: 18px;
-            animation: fadeIn 0.3s ease;
+            max-width: 75%;
+            animation: msg-in 0.3s ease;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
+        @keyframes msg-in {
+            from { opacity: 0; transform: translateY(8px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
+        .message .bubble {
+            padding: 12px 16px;
+            border-radius: var(--radius-lg);
+            font-size: 0.9rem;
+            line-height: 1.55;
+        }
+
+        .message .meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
         .message.scammer {
-            background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
             align-self: flex-end;
-            border-bottom-right-radius: 5px;
+        }
+
+        .message.scammer .meta {
+            justify-content: flex-end;
+            color: var(--red);
+        }
+
+        .message.scammer .bubble {
+            background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+            box-shadow: 0 2px 12px rgba(239, 68, 68, 0.2);
         }
 
         .message.victim {
-            background: rgba(255, 255, 255, 0.1);
             align-self: flex-start;
-            border-bottom-left-radius: 5px;
         }
 
-        .message .sender {
-            font-size: 0.75rem;
-            opacity: 0.7;
-            margin-bottom: 5px;
+        .message.victim .meta {
+            color: var(--accent);
         }
 
-        .message .text {
-            font-size: 0.95rem;
-            line-height: 1.4;
+        .message.victim .bubble {
+            background: rgba(6, 182, 212, 0.06);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(6, 182, 212, 0.15);
+            color: var(--text-primary);
+            border-bottom-left-radius: 4px;
         }
 
-        .chat-input {
-            padding: 20px;
-            background: rgba(0, 0, 0, 0.2);
-            display: flex;
-            gap: 10px;
-        }
-
-        .chat-input input {
-            flex: 1;
-            padding: 15px 20px;
-            border: none;
-            border-radius: 25px;
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
-            font-size: 1rem;
-            outline: none;
-            transition: background 0.3s;
-        }
-
-        .chat-input input:focus {
-            background: rgba(255, 255, 255, 0.15);
-        }
-
-        .chat-input input::placeholder {
-            color: rgba(255, 255, 255, 0.5);
-        }
-
-        .chat-input button {
-            padding: 15px 30px;
-            border: none;
-            border-radius: 25px;
-            background: linear-gradient(90deg, #e94560 0%, #ff6b6b 100%);
-            color: #fff;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .chat-input button:hover {
-            transform: scale(1.05);
-            box-shadow: 0 5px 20px rgba(233, 69, 96, 0.4);
-        }
-
-        .chat-input button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .sidebar {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .panel {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 15px;
-            padding: 20px;
-        }
-
-        .panel h2 {
-            font-size: 1rem;
-            margin-bottom: 15px;
-            color: #e94560;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .panel h2::before {
-            content: '';
-            width: 8px;
-            height: 8px;
-            background: #e94560;
-            border-radius: 50%;
-        }
-
-        .config-group {
-            margin-bottom: 15px;
-        }
-
-        .config-group label {
-            display: block;
-            font-size: 0.85rem;
-            margin-bottom: 5px;
-            opacity: 0.8;
-        }
-
-        .config-group input {
-            width: 100%;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
-            font-size: 0.9rem;
-            outline: none;
-        }
-
-        .btn-new-session {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e94560;
-            border-radius: 10px;
-            background: transparent;
-            color: #e94560;
-            font-size: 0.9rem;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .btn-new-session:hover {
-            background: #e94560;
-            color: #fff;
-        }
-
-        .intelligence-item {
-            background: rgba(255, 255, 255, 0.05);
-            padding: 10px 15px;
-            border-radius: 10px;
-            margin-bottom: 10px;
-        }
-
-        .intelligence-item h3 {
-            font-size: 0.8rem;
-            opacity: 0.7;
-            margin-bottom: 5px;
-        }
-
-        .intelligence-item .values {
-            font-size: 0.9rem;
-            color: #4ecca3;
-        }
-
-        .intelligence-item .values:empty::after {
-            content: 'None detected';
-            color: rgba(255, 255, 255, 0.3);
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        .stat-item {
-            background: rgba(255, 255, 255, 0.05);
-            padding: 15px;
-            border-radius: 10px;
+        .message.system .bubble {
+            background: var(--accent-soft);
+            border: 1px solid rgba(6, 182, 212, 0.2);
+            color: var(--accent);
             text-align: center;
+            font-size: 0.8rem;
+            border-radius: var(--radius-full);
+            padding: 8px 20px;
+            max-width: 100%;
+            align-self: center;
         }
 
-        .stat-item .value {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #4ecca3;
-        }
-
-        .stat-item .label {
-            font-size: 0.75rem;
-            opacity: 0.7;
-        }
-
-        .scam-badge {
+        .lang-badge {
             display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            font-weight: bold;
-        }
-
-        .scam-badge.detected {
-            background: #e94560;
-        }
-
-        .scam-badge.safe {
-            background: #4ecca3;
-            color: #1a1a2e;
+            padding: 1px 6px;
+            border-radius: var(--radius-sm);
+            font-size: 0.6rem;
+            font-weight: 700;
+            background: rgba(139, 92, 246, 0.2);
+            color: #a78bfa;
+            letter-spacing: 0.5px;
         }
 
         .typing-indicator {
             display: flex;
             gap: 5px;
-            padding: 12px 18px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 18px;
+            padding: 14px 18px;
+            background: var(--glass);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            border-bottom-left-radius: 4px;
             align-self: flex-start;
-            border-bottom-left-radius: 5px;
+            max-width: 75%;
         }
 
         .typing-indicator span {
-            width: 8px;
-            height: 8px;
-            background: rgba(255, 255, 255, 0.5);
+            width: 7px;
+            height: 7px;
+            background: var(--text-muted);
             border-radius: 50%;
-            animation: typing 1s infinite;
+            animation: typing 1.2s ease-in-out infinite;
         }
 
-        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
 
         @keyframes typing {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-5px); }
+            0%, 100% { transform: translateY(0); opacity: 0.4; }
+            50% { transform: translateY(-4px); opacity: 1; }
+        }
+
+        /* ── Chat input ── */
+        .chat-input {
+            padding: 16px 24px;
+            background: var(--glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-top: 1px solid var(--glass-border);
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 12px 20px;
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-full);
+            background: rgba(15, 23, 42, 0.6);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .chat-input input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .chat-input input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .chat-input button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: var(--radius-full);
+            background: linear-gradient(135deg, var(--accent) 0%, #0891b2 100%);
+            color: #fff;
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .chat-input button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px var(--accent-glow);
+        }
+
+        .chat-input button:active {
+            transform: translateY(0);
+        }
+
+        .chat-input button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 16px;
+            gap: 12px;
+            background: rgba(15, 23, 42, 0.4);
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 3px;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: var(--bg-elevated);
+            border-radius: 4px;
+        }
+
+        .panel {
+            background: var(--glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            border-left: 3px solid transparent;
+        }
+
+        .panel.panel-config { border-left-color: var(--accent); }
+        .panel.panel-stats { border-left-color: #8b5cf6; }
+        .panel.panel-intel { border-left-color: var(--green); }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .panel-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--text-muted);
+        }
+
+        /* ── Config panel ── */
+        .config-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .config-field label {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .config-field input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            background: rgba(15, 23, 42, 0.5);
+            color: var(--text-primary);
+            font-family: 'Inter', monospace;
+            font-size: 0.8rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .config-field input:focus {
+            border-color: var(--accent);
+        }
+
+        .btn-new-session {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--accent);
+            border-radius: var(--radius-sm);
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-new-session:hover {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        /* ── Stats panel ── */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .stat-card {
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            text-align: center;
+        }
+
+        .stat-card .value {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .stat-card .label {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+        }
+
+        .scam-badge {
+            display: inline-block;
+            padding: 4px 14px;
+            border-radius: var(--radius-full);
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            transition: all 0.3s;
+        }
+
+        .scam-badge.safe {
+            background: var(--green-soft);
+            color: var(--green);
+        }
+
+        .scam-badge.detected {
+            background: var(--red-soft);
+            color: var(--red);
+            animation: scam-pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes scam-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3); }
+            50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
         }
 
         .scam-types {
             display: flex;
             flex-wrap: wrap;
-            gap: 5px;
-            margin-top: 10px;
+            gap: 4px;
+            margin-top: 8px;
         }
 
         .scam-type-tag {
-            background: rgba(233, 69, 96, 0.3);
-            padding: 3px 10px;
-            border-radius: 15px;
+            background: var(--red-soft);
+            color: var(--red);
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+
+        /* ── Intelligence panel ── */
+        .intel-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .intel-item {
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+        }
+
+        .intel-item-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+
+        .intel-icon {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            flex-shrink: 0;
+        }
+
+        .intel-icon.phone { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+        .intel-icon.upi { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .intel-icon.link { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .intel-icon.bank { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+        .intel-icon.keyword { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+
+        .intel-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .intel-value {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        .intel-value:empty::after {
+            content: 'None detected';
+            color: var(--text-muted);
+            font-style: italic;
             font-size: 0.75rem;
         }
 
+        /* ── Error messages ── */
+        .error-text {
+            color: var(--red);
+        }
+
+        /* ── Responsive ── */
         @media (max-width: 900px) {
-            .container {
+            .main {
                 grid-template-columns: 1fr;
-                height: auto;
             }
 
             .chat-section {
                 height: 60vh;
+                border-right: none;
+                border-bottom: 1px solid var(--glass-border);
+            }
+
+            .sidebar {
+                height: 40vh;
+            }
+
+            .topbar {
+                padding: 10px 16px;
+            }
+
+            .chat-input {
+                padding: 12px 16px;
+            }
+
+            .chat-messages {
+                padding: 16px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .brand-text span {
+                display: none;
+            }
+
+            .session-pill span:not(.dot) {
+                display: none;
+            }
+
+            .message {
+                max-width: 88%;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="chat-section">
-            <div class="chat-header">
-                <h1>Honeypot Scam Detection</h1>
-                <p>You are the SCAMMER. Try to scam the AI victim.</p>
-            </div>
-            <div class="chat-messages" id="chatMessages">
-                <div class="message victim">
-                    <div class="sender">VICTIM (AI)</div>
-                    <div class="text">Hello! I received your message. What is this about?</div>
+    <div class="app">
+        <!-- Top bar -->
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-logo">IB</div>
+                <div class="brand-text">
+                    <h1>IntelliBait</h1>
+                    <span>AI-Powered Scam Intelligence</span>
                 </div>
             </div>
-            <div class="chat-input">
-                <input type="text" id="messageInput" placeholder="Type a scam message..." autocomplete="off">
-                <button id="sendBtn" onclick="sendMessage()">Send</button>
+            <div class="topbar-right">
+                <div class="session-pill">
+                    <span class="dot"></span>
+                    <span id="sessionDisplay">—</span>
+                </div>
+                <button class="btn-icon" onclick="newSession()" title="New Session">+</button>
             </div>
-        </div>
+        </header>
 
-        <div class="sidebar">
-            <div class="panel">
-                <h2>Configuration</h2>
-                <div class="config-group">
-                    <label>API Key</label>
-                    <input type="password" id="apiKey" value="my-super-secret-honeypot-key-2026">
-                </div>
-                <div class="config-group">
-                    <label>Session ID</label>
-                    <input type="text" id="sessionId" readonly>
-                </div>
-                <button class="btn-new-session" onclick="newSession()">New Session</button>
-            </div>
-
-            <div class="panel">
-                <h2>Session Stats</h2>
-                <div class="stats">
-                    <div class="stat-item">
-                        <div class="value" id="messageCount">0</div>
-                        <div class="label">Messages</div>
+        <!-- Main layout -->
+        <div class="main">
+            <!-- Chat -->
+            <div class="chat-section">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message victim">
+                        <div class="meta">AI Victim</div>
+                        <div class="bubble">Hello! I received your message. What is this about?</div>
                     </div>
-                    <div class="stat-item">
-                        <div class="value">
-                            <span class="scam-badge safe" id="scamBadge">SAFE</span>
+                </div>
+
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="Type a scam message..." autocomplete="off">
+                    <button id="sendBtn" onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <!-- Config -->
+                <div class="panel panel-config">
+                    <div class="panel-header">
+                        <span class="panel-title">Configuration</span>
+                    </div>
+                    <div class="config-grid">
+                        <div class="config-field">
+                            <label>API Key</label>
+                            <input type="password" id="apiKey" value="my-super-secret-honeypot-key-2026">
                         </div>
-                        <div class="label">Status</div>
+                        <div class="config-field">
+                            <label>Session ID</label>
+                            <input type="text" id="sessionId" readonly>
+                        </div>
+                        <button class="btn-new-session" onclick="newSession()">New Session</button>
                     </div>
                 </div>
-                <div class="scam-types" id="scamTypes"></div>
-            </div>
 
-            <div class="panel">
-                <h2>Extracted Intelligence</h2>
-                <div class="intelligence-item">
-                    <h3>Phone Numbers</h3>
-                    <div class="values" id="phoneNumbers"></div>
+                <!-- Stats -->
+                <div class="panel panel-stats">
+                    <div class="panel-header">
+                        <span class="panel-title">Session Stats</span>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="value" id="messageCount">0</div>
+                            <div class="label">Messages</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="value">
+                                <span class="scam-badge safe" id="scamBadge">SAFE</span>
+                            </div>
+                            <div class="label">Status</div>
+                        </div>
+                    </div>
+                    <div class="scam-types" id="scamTypes"></div>
                 </div>
-                <div class="intelligence-item">
-                    <h3>UPI IDs</h3>
-                    <div class="values" id="upiIds"></div>
-                </div>
-                <div class="intelligence-item">
-                    <h3>Phishing Links</h3>
-                    <div class="values" id="phishingLinks"></div>
-                </div>
-                <div class="intelligence-item">
-                    <h3>Bank Accounts</h3>
-                    <div class="values" id="bankAccounts"></div>
-                </div>
-                <div class="intelligence-item">
-                    <h3>Keywords</h3>
-                    <div class="values" id="keywords"></div>
+
+                <!-- Intelligence -->
+                <div class="panel panel-intel">
+                    <div class="panel-header">
+                        <span class="panel-title">Extracted Intelligence</span>
+                    </div>
+                    <div class="intel-list">
+                        <div class="intel-item">
+                            <div class="intel-item-header">
+                                <div class="intel-icon phone">P</div>
+                                <span class="intel-label">Phone Numbers</span>
+                            </div>
+                            <div class="intel-value" id="phoneNumbers"></div>
+                        </div>
+                        <div class="intel-item">
+                            <div class="intel-item-header">
+                                <div class="intel-icon upi">U</div>
+                                <span class="intel-label">UPI IDs</span>
+                            </div>
+                            <div class="intel-value" id="upiIds"></div>
+                        </div>
+                        <div class="intel-item">
+                            <div class="intel-item-header">
+                                <div class="intel-icon link">L</div>
+                                <span class="intel-label">Phishing Links</span>
+                            </div>
+                            <div class="intel-value" id="phishingLinks"></div>
+                        </div>
+                        <div class="intel-item">
+                            <div class="intel-item-header">
+                                <div class="intel-icon bank">B</div>
+                                <span class="intel-label">Bank Accounts</span>
+                            </div>
+                            <div class="intel-value" id="bankAccounts"></div>
+                        </div>
+                        <div class="intel-item">
+                            <div class="intel-item-header">
+                                <div class="intel-icon keyword">K</div>
+                                <span class="intel-label">Keywords</span>
+                            </div>
+                            <div class="intel-value" id="keywords"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -409,17 +798,18 @@
         let conversationHistory = [];
         let messageCount = 0;
 
-        // Generate session ID on load
         function generateSessionId() {
             return 'web-' + Math.random().toString(36).substr(2, 9);
         }
 
         function newSession() {
-            document.getElementById('sessionId').value = generateSessionId();
+            const id = generateSessionId();
+            document.getElementById('sessionId').value = id;
+            document.getElementById('sessionDisplay').textContent = id;
             document.getElementById('chatMessages').innerHTML = `
                 <div class="message victim">
-                    <div class="sender">VICTIM (AI)</div>
-                    <div class="text">Hello! I received your message. What is this about?</div>
+                    <div class="meta">AI Victim</div>
+                    <div class="bubble">Hello! I received your message. What is this about?</div>
                 </div>
             `;
             conversationHistory = [];
@@ -428,14 +818,11 @@
             updateIntelligence({});
         }
 
-        // Initialize session
+        // Initialize
         newSession();
 
-        // Handle Enter key
         document.getElementById('messageInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
+            if (e.key === 'Enter') sendMessage();
         });
 
         async function sendMessage() {
@@ -448,19 +835,20 @@
             const chatMessages = document.getElementById('chatMessages');
             const sendBtn = document.getElementById('sendBtn');
 
-            // Add scammer message to UI
+            // Detect if message contains Hindi
+            const hasHindi = /[\u0900-\u097F]/.test(message);
+            const langBadge = hasHindi ? ' <span class="lang-badge">HI</span>' : '';
+
             chatMessages.innerHTML += `
                 <div class="message scammer">
-                    <div class="sender">SCAMMER (You)</div>
-                    <div class="text">${escapeHtml(message)}</div>
+                    <div class="meta">You (Scammer)${langBadge}</div>
+                    <div class="bubble">${escapeHtml(message)}</div>
                 </div>
             `;
 
-            // Clear input
             input.value = '';
             sendBtn.disabled = true;
 
-            // Show typing indicator
             const typingId = 'typing-' + Date.now();
             chatMessages.innerHTML += `
                 <div class="typing-indicator" id="${typingId}">
@@ -486,27 +874,26 @@
                         conversationHistory: conversationHistory,
                         metadata: {
                             channel: 'Web',
-                            language: 'English',
+                            language: hasHindi ? 'Hindi' : 'English',
                             locale: 'IN'
                         }
                     })
                 });
 
                 const data = await response.json();
-
-                // Remove typing indicator
                 document.getElementById(typingId)?.remove();
 
                 if (data.status === 'success') {
-                    // Add victim response
+                    const replyHasHindi = /[\u0900-\u097F]/.test(data.reply);
+                    const replyLangBadge = replyHasHindi ? ' <span class="lang-badge">HI</span>' : '';
+
                     chatMessages.innerHTML += `
                         <div class="message victim">
-                            <div class="sender">VICTIM (AI)</div>
-                            <div class="text">${escapeHtml(data.reply)}</div>
+                            <div class="meta">AI Victim${replyLangBadge}</div>
+                            <div class="bubble">${escapeHtml(data.reply)}</div>
                         </div>
                     `;
 
-                    // Update conversation history
                     conversationHistory.push({
                         sender: 'scammer',
                         text: message,
@@ -519,23 +906,19 @@
                     });
 
                     messageCount += 2;
-
-                    // Fetch session info for intelligence
                     fetchSessionInfo(sessionId, apiKey);
                 } else {
                     chatMessages.innerHTML += `
-                        <div class="message victim">
-                            <div class="sender">SYSTEM</div>
-                            <div class="text" style="color: #ff6b6b;">Error: ${data.message || 'Unknown error'}</div>
+                        <div class="message system">
+                            <div class="bubble error-text">Error: ${escapeHtml(data.message || 'Unknown error')}</div>
                         </div>
                     `;
                 }
             } catch (error) {
                 document.getElementById(typingId)?.remove();
                 chatMessages.innerHTML += `
-                    <div class="message victim">
-                        <div class="sender">SYSTEM</div>
-                        <div class="text" style="color: #ff6b6b;">Connection error: ${error.message}</div>
+                    <div class="message system">
+                        <div class="bubble error-text">Connection error: ${escapeHtml(error.message)}</div>
                     </div>
                 `;
             }
@@ -550,7 +933,6 @@
                 const response = await fetch(`/sessions/${sessionId}`, {
                     headers: { 'x-api-key': apiKey }
                 });
-
                 if (response.ok) {
                     const data = await response.json();
                     updateStats(data);
@@ -577,7 +959,7 @@
             scamTypesContainer.innerHTML = '';
             if (data.detectedScamTypes && data.detectedScamTypes.length > 0) {
                 data.detectedScamTypes.forEach(type => {
-                    scamTypesContainer.innerHTML += `<span class="scam-type-tag">${type}</span>`;
+                    scamTypesContainer.innerHTML += `<span class="scam-type-tag">${escapeHtml(type)}</span>`;
                 });
             }
         }

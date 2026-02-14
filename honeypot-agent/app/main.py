@@ -40,6 +40,7 @@ from .session_manager import (
     get_session_data
 )
 from .guvi_callback import send_session_result_async, guvi_callback
+from .translator import detect_and_translate, translate_response
 
 # Safe fallback responses (used when everything else fails)
 _SAFE_FALLBACKS = [
@@ -70,8 +71,8 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI application
 app = FastAPI(
-    title="Honeypot Scam Detection API",
-    description="AI-powered honeypot system for detecting and engaging scammers.",
+    title="IntelliBait API",
+    description="AI-powered scam intelligence platform for detecting and engaging scammers.",
     version=__version__,
     lifespan=lifespan,
     docs_url="/docs",
@@ -197,6 +198,13 @@ async def analyze_message(
         if len(message_text) > 5000:
             message_text = message_text[:5000]
 
+        # ── Language detection & translation ──
+        original_message = message_text
+        english_text, detected_language, was_translated = detect_and_translate(message_text)
+        if was_translated:
+            logger.info(f"Hindi detected, translated to English: {english_text[:50]}...")
+            message_text = english_text
+
         logger.info(f"Processing session {session_id}: {message_text[:50]}...")
 
         # ── Session management ──
@@ -205,11 +213,11 @@ async def analyze_message(
             metadata=request.metadata.model_dump() if request.metadata else {}
         )
 
-        # Add scammer's message to session
+        # Add scammer's message to session (store original language)
         timestamp = request.get_timestamp()
         update_session(
             session_id,
-            message={"sender": sender, "text": message_text, "timestamp": timestamp}
+            message={"sender": sender, "text": original_message, "timestamp": timestamp}
         )
 
         # Build conversation history
@@ -279,6 +287,10 @@ async def analyze_message(
         # Validate reply is not empty
         if not reply or not reply.strip():
             reply = random.choice(_SAFE_FALLBACKS)
+
+        # ── Translate reply back to original language ──
+        if was_translated:
+            reply = translate_response(reply, detected_language)
 
         logger.info(f"Response: {reply[:50]}...")
 
