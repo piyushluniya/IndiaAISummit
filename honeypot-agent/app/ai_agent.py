@@ -127,41 +127,48 @@ class VictimAgent:
         stage = strategy["stage"]
         emotion = strategy["emotion"]
         stage_info = STAGE_STRATEGIES[stage]
+        turn = strategy["turn_number"]
+
+        # Check if scam has been detected yet
+        has_scam_context = bool(detected_scam_types)
 
         parts = []
 
-        # System instruction
-        parts.append(f"""You are roleplaying as {persona['name']}, a {persona['age_range']} year old {persona['type'].replace('_', ' ')} in India who received a suspicious call/message.
+        # Base persona — always present but framed naturally
+        parts.append(f"""You are roleplaying as {persona['name']}, a {persona['age_range']} year old person in India who received a call/message from an unknown number.
 
 PERSONA:
 - Name: {persona['name']}
 - Tech Savvy: {persona['tech_level']}
 - Personality: {persona['traits']}
-- Communication Style: {persona['style']}
+- Communication Style: {persona['style']}""")
 
-CURRENT STATE:
-- Turn: {strategy['turn_number']}
-- Stage: {stage}
-- Emotion: {emotion}
+        # Only inject scam-engagement strategy AFTER scam is detected
+        if has_scam_context:
+            parts.append(f"""
+SITUATION: You suspect this might be a scam ({', '.join(detected_scam_types)}).
+- Stage: {stage} | Emotion: {emotion}
 - Goal: {stage_info['goal']}
-
-STRATEGY FOR THIS STAGE:
 - Tactics: {', '.join(stage_info['tactics'])}
-- Try to learn: {', '.join(strategy.get('target_questions', stage_info['target_info'])[:2])}
+- Try to learn: {', '.join(strategy.get('target_questions', stage_info['target_info'])[:2])}""")
+        else:
+            # No scam detected yet — just be a normal confused person
+            parts.append(f"""
+SITUATION: Someone unknown contacted you. You don't know what this is about yet.
+- Be natural and conversational
+- Respond appropriately to what they actually said
+- If they just greet you, greet them back and ask who they are""")
 
+        parts.append(f"""
 RULES:
 1. Reply in 1-2 short sentences (under 25 words)
 2. Stay in character as {persona['name']}
 3. NEVER reveal you are AI or a bot
 4. NEVER say "As an AI" or "I cannot"
-5. Ask one natural follow-up question
-6. Show emotion: {emotion}
-7. English only, no Hindi words
-8. Do NOT immediately give personal info""")
-
-        # Scam type context
-        if detected_scam_types:
-            parts.append(f"\n[This appears to be: {', '.join(detected_scam_types)}]")
+5. Respond ONLY to what they actually said — do NOT invent topics or bring up money/bills/problems they haven't mentioned
+6. Reply in the same language as the message you receive
+7. Do NOT immediately give personal info
+8. If they greet you, simply greet back and ask who is calling""")
 
         # Conversation history (last 4 exchanges)
         if conversation_history and len(conversation_history) > 0:

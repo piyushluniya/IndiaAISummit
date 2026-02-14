@@ -23,6 +23,7 @@ from app.intelligence_extractor import extract_intelligence
 from app.urgency_detector import detect_urgency, detect_threats, analyze_pressure_tactics
 from app.behavior_analyzer import BehaviorAnalyzer
 from app.conversation_strategy import get_strategy, select_persona, get_stage
+from app.translator import is_hindi, detect_and_translate, translate_response, translate_to_english, translate_to_hindi
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -534,6 +535,116 @@ def test_strategy_has_required_fields():
 
 
 # ══════════════════════════════════════════════════════════════════════
+# CATEGORY 9: HINDI / DEVANAGARI TRANSLATION (10 tests)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_is_hindi_pure_devanagari():
+    """Pure Devanagari text should be detected as Hindi."""
+    if not is_hindi("आपका बैंक अकाउंट ब्लॉक हो गया है"):
+        return "Pure Devanagari not detected"
+    return True
+
+def test_is_hindi_mixed():
+    """Mixed Hindi + English with Devanagari chars should be detected."""
+    if not is_hindi("Please अपना OTP send करो"):
+        return "Mixed Hindi+English not detected"
+    return True
+
+def test_is_hindi_english_only():
+    """Pure English should NOT be detected as Hindi."""
+    if is_hindi("Your bank account has been blocked"):
+        return "English text wrongly detected as Hindi"
+    return True
+
+def test_is_hindi_romanized():
+    """Romanized Hindi (no Devanagari) should NOT be detected as Hindi."""
+    if is_hindi("aapka account block ho gaya hai"):
+        return "Romanized Hindi wrongly detected as Hindi"
+    return True
+
+def test_is_hindi_empty():
+    """Empty string should NOT be detected as Hindi."""
+    if is_hindi(""):
+        return "Empty string wrongly detected as Hindi"
+    return True
+
+def test_translate_hindi_to_english():
+    """Hindi bank scam message should translate to English with scam keywords."""
+    translated, success = translate_to_english("आपका बैंक अकाउंट ब्लॉक हो गया है")
+    if not success:
+        return "Translation failed"
+    lower = translated.lower()
+    if "bank" not in lower and "account" not in lower and "block" not in lower:
+        return f"Translation missing key terms: {translated}"
+    return True
+
+def test_translate_english_to_hindi():
+    """English text should translate to Hindi (contains Devanagari)."""
+    translated, success = translate_to_hindi("Your bank account has been blocked")
+    if not success:
+        return "Translation failed"
+    if not is_hindi(translated):
+        return f"Translation not in Hindi: {translated}"
+    return True
+
+def test_detect_and_translate_hindi():
+    """detect_and_translate should translate Hindi and return lang='hi'."""
+    english_text, lang, was_translated = detect_and_translate("आपका बैंक अकाउंट ब्लॉक हो गया है")
+    if not was_translated:
+        return "Should have been translated"
+    if lang != "hi":
+        return f"Expected lang 'hi', got '{lang}'"
+    if is_hindi(english_text):
+        return f"Result still contains Hindi: {english_text}"
+    return True
+
+def test_detect_and_translate_english():
+    """detect_and_translate should pass English through unchanged."""
+    text, lang, was_translated = detect_and_translate("Your bank account is blocked")
+    if was_translated:
+        return "English should not be translated"
+    if lang != "en":
+        return f"Expected lang 'en', got '{lang}'"
+    if text != "Your bank account is blocked":
+        return "English text should pass through unchanged"
+    return True
+
+def test_translate_response_roundtrip():
+    """translate_response should return Hindi when target_lang='hi'."""
+    reply = translate_response("Oh no! What happened to my account?", "hi")
+    if not is_hindi(reply):
+        return f"Reply not in Hindi: {reply}"
+    return True
+
+def test_translate_response_english_passthrough():
+    """translate_response should return English unchanged when target_lang='en'."""
+    reply = translate_response("Oh no! What happened?", "en")
+    if reply != "Oh no! What happened?":
+        return "English reply should not be modified"
+    return True
+
+def test_hindi_scam_detected_after_translation():
+    """Hindi scam message should be detected as scam after translation."""
+    english_text, lang, was_translated = detect_and_translate("आपका बैंक अकाउंट ब्लॉक हो गया है, अभी OTP भेजिये")
+    if not was_translated:
+        return "Translation failed"
+    result = detect_scam(english_text)
+    if not result.is_scam:
+        return f"Translated text not detected as scam: {english_text}"
+    return True
+
+def test_hindi_legit_not_scam_after_translation():
+    """Hindi greeting should NOT be detected as scam after translation."""
+    english_text, lang, was_translated = detect_and_translate("नमस्ते, आप कैसे हैं?")
+    if not was_translated:
+        return "Translation failed"
+    result = detect_scam(english_text)
+    if result.is_scam:
+        return f"Translated greeting wrongly flagged as scam: {english_text}"
+    return True
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Run Tests
 # ══════════════════════════════════════════════════════════════════════
 
@@ -636,6 +747,24 @@ CATEGORIES = {
             ("Late stage", test_late_stage),
             ("Persona consistency", test_persona_consistency),
             ("Strategy fields", test_strategy_has_required_fields),
+        ]
+    },
+    "translation": {
+        "name": "Hindi / Devanagari Translation",
+        "tests": [
+            ("Pure Devanagari detection", test_is_hindi_pure_devanagari),
+            ("Mixed Hindi+English detection", test_is_hindi_mixed),
+            ("English-only not Hindi", test_is_hindi_english_only),
+            ("Romanized Hindi not Hindi", test_is_hindi_romanized),
+            ("Empty string not Hindi", test_is_hindi_empty),
+            ("Hindi to English translation", test_translate_hindi_to_english),
+            ("English to Hindi translation", test_translate_english_to_hindi),
+            ("detect_and_translate Hindi", test_detect_and_translate_hindi),
+            ("detect_and_translate English", test_detect_and_translate_english),
+            ("Response roundtrip to Hindi", test_translate_response_roundtrip),
+            ("Response English passthrough", test_translate_response_english_passthrough),
+            ("Hindi scam detected after translation", test_hindi_scam_detected_after_translation),
+            ("Hindi greeting not scam", test_hindi_legit_not_scam_after_translation),
         ]
     },
 }

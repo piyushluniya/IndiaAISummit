@@ -22,3 +22,6 @@ python-multipart>=0.0.6
 # ML Dependencies
 scikit-learn>=1.3.0
 pandas>=2.0.0
+
+# Translation Support
+deep-translator>=1.11.4
