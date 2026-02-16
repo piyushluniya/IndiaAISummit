@@ -188,6 +188,10 @@ def get_strategy(
         target_questions.append("What number can I call you back on?")
     if "upi_id" in missing_info:
         target_questions.append("Where should I send payment? What is the UPI ID?")
+    if "email" in missing_info:
+        target_questions.append("Can you email me the details? What is your email address?")
+    if "bank_account" in missing_info:
+        target_questions.append("What bank account should I transfer to?")
     if "employee_id" in missing_info:
         target_questions.append("What is your employee ID?")
     if "link" in missing_info:
@@ -222,6 +226,10 @@ def _get_missing_info(extracted_intel: Dict) -> List[str]:
         missing.append("upi_id")
     if not extracted_intel.get("phishingLinks"):
         missing.append("link")
+    if not extracted_intel.get("emailAddresses"):
+        missing.append("email")
+    if not extracted_intel.get("bankAccounts"):
+        missing.append("bank_account")
     # Always try to get employee ID
     missing.append("employee_id")
     return missing

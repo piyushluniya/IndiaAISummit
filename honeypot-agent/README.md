@@ -1,148 +1,60 @@
-# Agentic Honeypot Scam Detection System
+# IntelliBait - Agentic Honeypot for Scam Detection & Intelligence Extraction
 
-An AI-powered honeypot system designed to detect and engage scammers, extracting actionable intelligence while protecting potential victims. Built for the GUVI India Hackathon.
+An AI-powered honeypot system that detects scams, engages scammers with realistic victim personas, and extracts actionable intelligence. Built for the India AI Summit Hackathon.
 
-## Overview
+## Description
 
-This system acts as a "honeypot" that:
-1. **Detects** scam messages using keyword analysis and pattern matching
-2. **Engages** scammers with realistic AI-generated victim responses
-3. **Extracts** intelligence (phone numbers, UPI IDs, bank accounts, phishing links)
-4. **Reports** findings to the GUVI platform for further action
+IntelliBait simulates a convincing scam victim to waste scammers' time and extract their operational details (phone numbers, UPI IDs, bank accounts, phishing links, email addresses). The system uses a multi-layer detection engine, adaptive conversation strategies, and Google Gemini AI to maintain natural conversations while systematically eliciting intelligence.
 
-## Architecture
+## Tech Stack
 
-```
-                                  ┌─────────────────────────────────────┐
-                                  │        GUVI Hackathon Platform      │
-                                  └──────────────┬──────────────────────┘
-                                                 │
-                                    POST /analyze │ POST callback
-                                                 ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│                         HONEYPOT API SERVER                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
-│  │   FastAPI    │  │    Scam      │  │     AI       │  │  Intelligence │  │
-│  │   Endpoint   │──│  Detector    │──│    Agent     │──│   Extractor   │  │
-│  │   /analyze   │  │              │  │   (Gemini)   │  │               │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └───────────────┘  │
-│         │                                                      │          │
-│         ▼                                                      ▼          │
-│  ┌──────────────────────────────────────────────────────────────────┐    │
-│  │                      Session Manager                              │    │
-│  │   • Conversation History    • Extracted Intelligence              │    │
-│  │   • Scam Detection Results  • Session State (active/completed)    │    │
-│  └──────────────────────────────────────────────────────────────────┘    │
-│                                    │                                      │
-│                                    ▼                                      │
-│                          ┌──────────────────┐                            │
-│                          │  GUVI Callback   │                            │
-│                          │  (when complete) │                            │
-│                          └──────────────────┘                            │
-└────────────────────────────────────────────────────────────────────────────┘
-```
+- **Language/Framework**: Python 3.9+ / FastAPI
+- **AI/LLM**: Google Gemini (gemini-2.5-flash-lite)
+- **Key Libraries**: Pydantic (validation), google-generativeai (AI), uvicorn (ASGI server)
+- **Detection**: Multi-layer rule engine + ML classifier + NLP pattern matching
+- **Deployment**: Render (production), Docker-ready
 
-## Features
-
-### Scam Detection
-- Multi-factor analysis using keywords and patterns
-- Detects: Bank fraud, UPI fraud, OTP theft, Phishing, Impersonation
-- Confidence scoring (0-100%)
-- Real-time pattern matching
-
-### AI Agent (Google Gemini)
-- Generates natural, human-like victim responses
-- Maintains conversation context
-- Adapts to scammer tactics
-- Never reveals its true nature
-
-### Intelligence Extraction
-- Phone numbers (Indian & International)
-- UPI IDs (Paytm, PhonePe, GPay, etc.)
-- Bank account numbers
-- Phishing URLs/Links
-- Suspicious keywords
-
-### Session Management
-- Per-session tracking
-- Conversation history
-- Automatic session termination
-- Concurrent session support
-
-## Quick Start
-
-### Prerequisites
-- Python 3.9+
-- Google Gemini API key ([Get one here](https://ai.google.dev/))
-
-### Installation
+## Setup Instructions
 
 ```bash
-# Clone the repository
-cd honeypot-agent
+# 1. Clone the repository
+git clone https://github.com/piyushluniya/IndiaAISummit.git
+cd IndiaAISummit/honeypot-agent
 
-# Create virtual environment
+# 2. Create virtual environment
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or
-.\venv\Scripts\activate  # Windows
+source venv/bin/activate    # Linux/Mac
+# .\venv\Scripts\activate   # Windows
 
-# Install dependencies
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# Configure environment
+# 4. Set environment variables
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env with your API keys:
+#   GEMINI_API_KEY=your_gemini_key
+#   API_SECRET_KEY=your_api_secret
+
+# 5. Run the application
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Configuration
+## API Endpoint
 
-Edit `.env` file:
+- **URL**: `https://your-deployed-url.com/analyze` (also accepts `POST /`)
+- **Method**: POST
+- **Authentication**: `x-api-key` header (required)
+- **Content-Type**: `application/json`
 
-```env
-# Required
-GEMINI_API_KEY=your_gemini_api_key_here
-API_SECRET_KEY=your_secret_api_key_here
+### Request Format
 
-# Optional
-PORT=8000
-MAX_MESSAGES_PER_SESSION=20
-```
-
-### Running the Server
-
-```bash
-# Development mode with auto-reload
-uvicorn app.main:app --reload --port 8000
-
-# Production mode
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-```
-
-### Running Tests
-
-```bash
-# Full test suite
-python test_api.py
-
-# Quick test
-python test_api.py --quick
-```
-
-## API Documentation
-
-### Main Endpoint: POST /analyze
-
-Analyzes a scammer message and returns an AI-generated response.
-
-**Request:**
 ```json
 {
   "sessionId": "unique-session-id",
   "message": {
     "sender": "scammer",
-    "text": "Your bank account will be blocked today.",
-    "timestamp": "2026-01-21T10:15:30Z"
+    "text": "URGENT: Your account has been compromised...",
+    "timestamp": "2026-02-11T10:30:00Z"
   },
   "conversationHistory": [],
   "metadata": {
@@ -153,270 +65,188 @@ Analyzes a scammer message and returns an AI-generated response.
 }
 ```
 
-**Headers:**
-```
-Content-Type: application/json
-x-api-key: your_secret_api_key
-```
+### Response Format
 
-**Response:**
 ```json
 {
   "status": "success",
-  "reply": "Oh no! Why is my account being blocked? What should I do?"
+  "reply": "Oh no! What happened to my account? What is your name and which branch?"
 }
 ```
 
-### Health Check: GET /
+### Final Output (Callback)
+
+When a session completes, the system submits:
 
 ```json
 {
-  "status": "healthy",
-  "version": "1.0.0",
-  "timestamp": "2026-01-21T10:00:00Z",
-  "active_sessions": 5
+  "sessionId": "abc123",
+  "status": "success",
+  "scamDetected": true,
+  "totalMessagesExchanged": 20,
+  "extractedIntelligence": {
+    "phoneNumbers": ["+91-9876543210"],
+    "bankAccounts": ["1234567890123456"],
+    "upiIds": ["scammer.fraud@fakebank"],
+    "phishingLinks": ["http://malicious-site.com"],
+    "emailAddresses": ["scammer@fake.com"]
+  },
+  "engagementMetrics": {
+    "engagementDurationSeconds": 120.5,
+    "totalMessagesExchanged": 20
+  },
+  "agentNotes": "Scam types detected: bank_impersonation. Red flags: Artificial time pressure; Authority impersonation; Credential harvesting. Phone numbers extracted: 9876543210. Tactics: urgency_pressure, threat_intimidation."
 }
 ```
 
-### Debug Endpoints
+## Approach
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/sessions` | GET | List all active sessions |
-| `/sessions/{id}` | GET | Get session details |
-| `/sessions/{id}` | DELETE | Delete a session |
-| `/sessions/{id}/end` | POST | Manually end session |
-| `/stats` | GET | System statistics |
-| `/test/detect` | POST | Test scam detection |
-| `/test/extract` | POST | Test intelligence extraction |
-| `/test/response` | POST | Test AI response generation |
+### How We Detect Scams
+
+The system uses a **4-layer hybrid detection engine**:
+
+1. **Layer 1 - Keyword Scoring** (100+ weighted terms): High-risk terms like "blocked", "OTP", "suspended" score 8-10 pts; medium-risk terms like "account", "verify" score 3-5 pts. Normalized to 0-1.0 confidence.
+
+2. **Layer 2 - Pattern Matching** (18+ regex patterns): Multi-word scam patterns like `"your.*account.*(blocked|suspended)"` for bank impersonation (0.9 weight), `"send.*money.*upi"` for UPI fraud (0.9), `"share.*otp"` for OTP theft (0.95).
+
+3. **Layer 3 - Contextual Analysis**: Analyzes conversation history for escalating threats (+0.3), repeated info requests (+0.25), trust+money combinations (+0.3), and multi-org contradictions (+0.2).
+
+4. **Layer 4 - Feature Scoring**: Structural indicators — urgency words (+0.3), contact info presence (+0.2), links (+0.25), authority impersonation (+0.3), sensitive info requests (+0.4).
+
+**Final confidence** = weighted combination of all layers. Scam threshold: 0.45.
+
+### Red Flag Identification
+
+The system identifies and reports specific red flags:
+- **Artificial time pressure**: "urgent", "expire", "last chance", "hurry"
+- **Authority impersonation**: Claiming to be from RBI, police, bank officers
+- **Credential harvesting**: Requesting OTP, PIN, CVV, passwords
+- **Financial extraction**: Requesting money transfers or UPI payments
+- **Threatening language**: Account blocking, legal action, arrest threats
+- **Suspicious link sharing**: Phishing URLs, shortened links
+- **Social engineering bait**: Fake prizes, cashback, lottery offers
+- **Progressive escalation**: Increasingly aggressive information requests
+
+### How We Extract Intelligence
+
+Generic extraction using compiled regex patterns (not hardcoded to test data):
+
+| Data Type | Method | Example |
+|-----------|--------|---------|
+| Phone Numbers | Indian format regex with prefix handling (+91, 91, 0) | `+91-9876543210`, `98765 43210` |
+| UPI IDs | Standard + obfuscated patterns, validated against known handles | `user@paytm`, `user AT gpay` |
+| Bank Accounts | 9-18 digit numbers with context-aware validation | `1234567890123456` near "account" |
+| Phishing Links | HTTP/HTTPS URLs, short URLs, obfuscated domains | `bit.ly/xxx`, `example[dot]com` |
+| Email Addresses | Standard + obfuscated email patterns | `user@domain.com`, `user (at) domain` |
+| IFSC Codes | 4-letter + 0 + 6-alphanumeric pattern | `SBIN0001234` |
+
+### How We Maintain Engagement
+
+The AI agent uses **5 distinct victim personas** (selected per session via hash for consistency):
+- **Kamla Devi** (elderly, low tech) — confused, polite, trusting
+- **Rahul Sharma** (professional, moderate tech) — busy, asks for verification
+- **Priya Patel** (student, high tech) — curious but inexperienced
+- **Sunita Verma** (homemaker, low tech) — worried, family-focused
+- **Ajay Gupta** (business owner, moderate tech) — direct, demands specifics
+
+**3-stage conversation strategy**:
+1. **Early** (turns 1-5): Appear vulnerable, ask who they are, get their phone number
+2. **Middle** (turns 6-12): Ask for UPI ID, email, official link, employee ID
+3. **Late** (turns 13+): Demand proof, point out inconsistencies, collect remaining intel
+
+**Every response ends with a question** asking for the scammer's details — this is the core information elicitation mechanism.
+
+### Auto-Finalization
+
+A 5-second inactivity timer ensures the final output is submitted even if the conversation ends abruptly. This guarantees the callback reaches the evaluation platform within its 10-second window.
 
 ## Project Structure
 
 ```
 honeypot-agent/
 ├── app/
-│   ├── __init__.py             # Package initialization
-│   ├── main.py                 # FastAPI application & endpoints
-│   ├── config.py               # Configuration & environment variables
-│   ├── models.py               # Pydantic models
-│   ├── scam_detector.py        # Scam detection logic
-│   ├── ai_agent.py             # Gemini AI integration
-│   ├── intelligence_extractor.py  # Intelligence extraction
-│   ├── session_manager.py      # Session management
-│   └── guvi_callback.py        # GUVI callback handler
-├── requirements.txt            # Python dependencies
-├── .env.example                # Environment template
-├── test_api.py                 # Test script
-└── README.md                   # This file
+│   ├── __init__.py                  # Package init, version
+│   ├── main.py                      # FastAPI app, endpoints, auto-finalization timer
+│   ├── config.py                    # Environment config, keywords, patterns
+│   ├── models.py                    # Pydantic schemas with validation
+│   ├── scam_detector.py             # 4-layer hybrid scam detection engine
+│   ├── ai_agent.py                  # Gemini AI victim persona + elicitation
+│   ├── intelligence_extractor.py    # Regex-based intel extraction (phone, UPI, etc.)
+│   ├── conversation_strategy.py     # Persona selection, stage management
+│   ├── session_manager.py           # Thread-safe session lifecycle
+│   ├── urgency_detector.py          # Pressure tactics analysis
+│   ├── translator.py                # Hindi/English translation
+│   ├── ml_classifier.py             # Optional ML scam classifier
+│   ├── guvi_callback.py             # Final output submission with retry
+│   └── static/                      # Static assets (favicon, UI)
+├── requirements.txt                 # Python dependencies
+├── .env.example                     # Environment variables template
+├── .gitignore                       # Git ignore rules
+├── render.yaml                      # Render deployment config
+├── eval_scenarios.py                # Self-evaluation test script
+├── test_api.py                      # API test suite
+└── README.md                        # This file
 ```
 
-## Scam Detection Logic
+## Error Handling
 
-### Keyword Scoring
+The system implements a **never-crash guarantee**:
 
-| Category | Keywords | Score |
-|----------|----------|-------|
-| High Risk | blocked, suspended, verify, OTP, urgent | 10 pts each |
-| Medium Risk | confirm, account, bank, payment, KYC | 5 pts each |
+- **Input validation**: Pydantic field validators on `sessionId`, `sender`, `text` with automatic sanitization and truncation (5000 char limit)
+- **Layer-by-layer try/except**: Each processing step (detection, extraction, AI generation) has independent error handling with safe fallbacks
+- **AI fallback chain**: If Gemini fails → smart context-aware fallback responses → generic safe responses
+- **Retry with backoff**: Gemini API calls retry up to 3 times with exponential backoff
+- **Session resilience**: Thread-safe session management with RLock, automatic cleanup of stale sessions
+- **Callback reliability**: Final output submission retries 3 times with exponential backoff
+- **Auto-finalization**: Background timer ensures final output is sent even if the evaluator stops sending messages
 
-**Threshold:** 15+ points = Scam detected
+The API always returns `200 OK` with a valid `{"status": "success", "reply": "..."}` response — it never crashes or returns error codes for valid requests.
 
-### Pattern Detection
+## Testing
 
-- **Bank Fraud:** "your account" + "bank" + action word
-- **UPI Fraud:** UPI/Paytm/PhonePe + payment request
-- **OTP Scam:** Request for OTP/verification code
-- **Phishing:** Contains link + urgency
-- **Impersonation:** RBI, police, government mentions
+```bash
+# Run self-evaluation against all 3 sample scenarios
+python eval_scenarios.py
 
-## Intelligence Extraction Patterns
+# Quick endpoint test
+python test_api.py
 
-### Phone Numbers
-- Indian: `+91XXXXXXXXXX` or `9XXXXXXXXX`
-- International: `+[country code][number]`
-
-### UPI IDs
-- Pattern: `username@bankhandle`
-- Validates against known UPI handles
-
-### Bank Accounts
-- 9-18 digit numbers with bank context
-
-### URLs
-- Full URLs: `https://...`
-- Short URLs: `bit.ly/...`, `goo.gl/...`
-
-## Session Lifecycle
-
-```
-                    ┌───────────────┐
-                    │  New Message  │
-                    └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-            ┌───────│ Session Exists?│───────┐
-            │ No    └───────────────┘  Yes   │
-            ▼                                ▼
-    ┌───────────────┐               ┌───────────────┐
-    │Create Session │               │Update Session │
-    └───────┬───────┘               └───────┬───────┘
-            │                               │
-            └───────────┬───────────────────┘
-                        │
-                        ▼
-                ┌───────────────┐
-                │Detect Scam    │
-                │Extract Intel  │
-                │Generate Reply │
-                └───────┬───────┘
-                        │
-                        ▼
-                ┌───────────────┐
-            ┌───│ Should End?   │───┐
-            │No └───────────────┘Yes│
-            │                       │
-            ▼                       ▼
-    ┌───────────────┐       ┌───────────────┐
-    │Return Response│       │End Session    │
-    └───────────────┘       │Send Callback  │
-                            │Return Response│
-                            └───────────────┘
+# Manual cURL test
+curl -X POST http://localhost:8000/analyze \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"sessionId":"test-1","message":{"sender":"scammer","text":"Your account is blocked!"},"conversationHistory":[],"metadata":{"channel":"SMS","language":"English","locale":"IN"}}'
 ```
 
-### Session End Triggers
-- 20+ messages exchanged
-- 30 minutes session duration
-- 5 minutes inactivity
-- Sufficient intelligence extracted
+## Environment Variables
 
-## GUVI Callback Payload
-
-When a session ends, this payload is sent:
-
-```json
-{
-  "sessionId": "abc123",
-  "scamDetected": true,
-  "totalMessagesExchanged": 20,
-  "extractedIntelligence": {
-    "bankAccounts": [],
-    "upiIds": ["scammer@paytm"],
-    "phishingLinks": ["https://fake-site.com"],
-    "phoneNumbers": ["9876543210"],
-    "suspiciousKeywords": ["blocked", "verify", "urgent"]
-  },
-  "agentNotes": "Scammer attempted bank fraud via UPI..."
-}
-```
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GEMINI_API_KEY` | Yes | — | Google Gemini API key |
+| `API_SECRET_KEY` | Yes | `default-secret-key` | API authentication key |
+| `PORT` | No | `8000` | Server port |
+| `GEMINI_MODEL` | No | `gemini-2.5-flash-lite` | Gemini model name |
+| `MAX_MESSAGES_PER_SESSION` | No | `20` | Max messages before session ends |
+| `SESSION_TIMEOUT_MINUTES` | No | `30` | Session duration limit |
+| `LOG_LEVEL` | No | `INFO` | Logging level |
+| `GUVI_CALLBACK_URL` | No | `https://hackathon.guvi.in/...` | Callback endpoint |
 
 ## Deployment
 
-### Local Development
+### Render (Production)
+The `render.yaml` is pre-configured. Connect the GitHub repo and set environment variables.
+
+### Docker
 ```bash
-uvicorn app.main:app --reload --port 8000
+docker build -t intellibait .
+docker run -p 8000:8000 --env-file .env intellibait
 ```
 
-### Production (Gunicorn)
+### Production
 ```bash
 gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
 ```
 
-### Docker
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-### Cloud Platforms
-
-**Render:**
-- Create new Web Service
-- Connect GitHub repo
-- Set environment variables
-- Deploy
-
-**Railway:**
-- `railway init`
-- `railway up`
-
-**Google Cloud Run:**
-```bash
-gcloud run deploy honeypot --source . --region asia-south1
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**1. Gemini API Errors**
-- Check API key is valid
-- Verify quota/billing
-- Check safety settings
-
-**2. Authentication Failures**
-- Ensure `x-api-key` header is sent
-- Verify API_SECRET_KEY matches
-
-**3. No Intelligence Extracted**
-- Check message contains extractable data
-- Review regex patterns in `intelligence_extractor.py`
-
-### Debug Mode
-
-Set in `.env`:
-```env
-LOG_LEVEL=DEBUG
-```
-
-### API Logs
-
-All requests and responses are logged:
-```
-2026-01-21 10:15:30 - INFO - Request: POST /analyze
-2026-01-21 10:15:31 - INFO - Scam detection: is_scam=True, confidence=0.95
-2026-01-21 10:15:32 - INFO - Generated AI response: "Oh no!..."
-```
-
-## Performance
-
-- Response time: < 2 seconds
-- Concurrent sessions: 100+
-- Memory: ~100MB base + ~1KB per session
-
-## Security Considerations
-
-- API key authentication required
-- No real personal data stored
-- Input sanitization
-- Rate limiting (recommended in production)
-- HTTPS recommended
-
-## License
-
-MIT License - See LICENSE file
-
-## Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Commit changes
-4. Push to branch
-5. Create Pull Request
-
-## Support
-
-For issues and feature requests, please create an issue on GitHub.
-
 ---
 
-Built with FastAPI, Google Gemini AI, and Pydantic for GUVI India Hackathon 2026.
+Built with FastAPI, Google Gemini AI, and Pydantic for India AI Summit Hackathon 2026.

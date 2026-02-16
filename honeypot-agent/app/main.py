@@ -62,36 +62,68 @@ _timer_lock = threading.Lock()
 
 
 def _generate_quick_notes(session: SessionData) -> str:
-    """Generate agent notes quickly without AI call (for time-critical finalization)."""
+    """Generate agent notes quickly without AI call (for time-critical finalization).
+    Includes red flags, extracted intelligence, and scammer tactics."""
     intel = session.extractedIntelligence
     parts = [f"Scam types detected: {', '.join(session.detectedScamTypes) or 'general scam'}."]
+
+    # Red flags
+    red_flags = []
+    scammer_text = " ".join(
+        m.get("text", "").lower() for m in session.conversationHistory
+        if m.get("sender", "").lower() != "user"
+    )
+    if any(w in scammer_text for w in ["urgent", "immediately", "expire", "last chance", "hurry"]):
+        red_flags.append("Artificial time pressure")
+    if any(w in scammer_text for w in ["blocked", "suspended", "frozen", "legal action", "arrest"]):
+        red_flags.append("Threatening language")
+    if any(w in scammer_text for w in ["rbi", "government", "police", "officer", "department"]):
+        red_flags.append("Authority impersonation")
+    if any(w in scammer_text for w in ["otp", "pin", "cvv", "password"]):
+        red_flags.append("Credential harvesting attempt")
+    if any(w in scammer_text for w in ["send money", "transfer", "pay", "upi"]):
+        red_flags.append("Financial extraction attempt")
+    if any(w in scammer_text for w in ["click", "http", "link", "url"]):
+        red_flags.append("Suspicious link sharing")
+    if any(w in scammer_text for w in ["won", "prize", "cashback", "reward", "lottery"]):
+        red_flags.append("Social engineering bait")
+    if red_flags:
+        parts.append(f"Red flags identified: {'; '.join(red_flags)}.")
+
+    # Extracted intelligence
     if intel.phoneNumbers:
-        parts.append(f"Phone numbers: {', '.join(intel.phoneNumbers)}.")
+        parts.append(f"Phone numbers extracted: {', '.join(intel.phoneNumbers)}.")
     if intel.upiIds:
-        parts.append(f"UPI IDs: {', '.join(intel.upiIds)}.")
+        parts.append(f"UPI IDs extracted: {', '.join(intel.upiIds)}.")
     if intel.bankAccounts:
-        parts.append(f"Bank accounts: {', '.join(intel.bankAccounts)}.")
+        parts.append(f"Bank accounts extracted: {', '.join(intel.bankAccounts)}.")
     if intel.phishingLinks:
-        parts.append(f"Phishing links: {', '.join(intel.phishingLinks)}.")
+        parts.append(f"Phishing links extracted: {', '.join(intel.phishingLinks)}.")
     if intel.emailAddresses:
-        parts.append(f"Email addresses: {', '.join(intel.emailAddresses)}.")
+        parts.append(f"Email addresses extracted: {', '.join(intel.emailAddresses)}.")
     parts.append(f"Conversation: {session.messageCount} messages exchanged.")
 
-    # Detect tactics from scammer messages
-    tactics = []
+    # Scammer tactics
+    tactics = set()
     for msg in session.conversationHistory:
         if msg.get("sender", "").lower() != "user":
             text = msg.get("text", "").lower()
-            if any(w in text for w in ["urgent", "immediately", "now", "asap"]):
-                tactics.append("urgency")
-            if any(w in text for w in ["blocked", "suspended", "frozen", "closed"]):
-                tactics.append("threat")
+            if any(w in text for w in ["urgent", "immediately", "now", "asap", "hurry"]):
+                tactics.add("urgency_pressure")
+            if any(w in text for w in ["blocked", "suspended", "frozen", "closed", "legal"]):
+                tactics.add("threat_intimidation")
             if any(w in text for w in ["bank", "rbi", "government", "officer", "department"]):
-                tactics.append("impersonation")
-            if any(w in text for w in ["otp", "pin", "cvv", "password"]):
-                tactics.append("info_extraction")
+                tactics.add("authority_impersonation")
+            if any(w in text for w in ["otp", "pin", "cvv", "password", "verify"]):
+                tactics.add("credential_harvesting")
+            if any(w in text for w in ["send money", "transfer", "pay", "upi"]):
+                tactics.add("financial_extraction")
+            if any(w in text for w in ["click", "link", "http", "url"]):
+                tactics.add("phishing_link_distribution")
+            if any(w in text for w in ["won", "prize", "cashback", "reward", "lottery"]):
+                tactics.add("social_engineering_bait")
     if tactics:
-        parts.append(f"Tactics: {', '.join(set(tactics))}.")
+        parts.append(f"Scammer tactics observed: {', '.join(sorted(tactics))}.")
 
     return " ".join(parts)
 

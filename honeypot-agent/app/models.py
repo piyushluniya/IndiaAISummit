@@ -5,7 +5,7 @@ Defines request/response schemas and data structures.
 
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
 
@@ -29,6 +29,20 @@ class MessageData(BaseModel):
     sender: str = Field(..., description="Message sender (scammer or user)")
     text: str = Field(..., description="Message content")
     timestamp: Optional[Any] = Field(None, description="Timestamp - can be epoch ms (int) or ISO string")
+
+    @field_validator("sender")
+    @classmethod
+    def validate_sender(cls, v: str) -> str:
+        if not v or not v.strip():
+            return "scammer"
+        return v.strip().lower()
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        if not v:
+            return ""
+        return v.strip()[:5000]  # Truncate overly long messages
 
     class Config:
         json_schema_extra = {
@@ -68,6 +82,13 @@ class IncomingMessage(BaseModel):
         None,
         description="Additional metadata"
     )
+
+    @field_validator("sessionId")
+    @classmethod
+    def validate_session_id(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("sessionId cannot be empty")
+        return v.strip()
 
     def get_session_id(self) -> str:
         """Get session ID."""
