@@ -8,7 +8,7 @@ import asyncio
 import requests
 from typing import Dict, Optional, Any
 from concurrent.futures import ThreadPoolExecutor
-from .models import GuviCallbackPayload, SessionData
+from .models import GuviCallbackPayload, SessionData, EngagementMetrics
 from .config import logger, settings
 
 
@@ -47,14 +47,25 @@ class GuviCallback:
             "upiIds": intelligence.get("upiIds", []),
             "phishingLinks": intelligence.get("phishingLinks", []),
             "phoneNumbers": intelligence.get("phoneNumbers", []),
+            "emailAddresses": intelligence.get("emailAddresses", []),
             "suspiciousKeywords": intelligence.get("suspiciousKeywords", [])
         }
 
+        # Calculate engagement metrics
+        duration_seconds = session_data.get("engagementDurationSeconds", 0)
+        total_messages = session_data.get("totalMessagesExchanged", 0)
+        engagement_metrics = EngagementMetrics(
+            engagementDurationSeconds=duration_seconds,
+            totalMessagesExchanged=total_messages
+        )
+
         return GuviCallbackPayload(
             sessionId=session_data.get("sessionId", ""),
+            status="success",
             scamDetected=session_data.get("scamDetected", False),
-            totalMessagesExchanged=session_data.get("totalMessagesExchanged", 0),
+            totalMessagesExchanged=total_messages,
             extractedIntelligence=formatted_intelligence,
+            engagementMetrics=engagement_metrics,
             agentNotes=session_data.get("agentNotes", "")
         )
 
@@ -157,6 +168,26 @@ class GuviCallback:
         logger.error(f"All callback attempts failed for session: {payload.sessionId}")
         return False
 
+    @staticmethod
+    def _calc_duration(session: SessionData) -> float:
+        """Calculate engagement duration in seconds from session timestamps."""
+        try:
+            delta = session.lastMessageTime - session.startTime
+            return max(delta.total_seconds(), 0)
+        except Exception:
+            return 0
+
+    def _session_to_dict(self, session: SessionData) -> Dict:
+        """Convert SessionData to a dict suitable for callback payload."""
+        return {
+            "sessionId": session.sessionId,
+            "scamDetected": session.scamDetected,
+            "totalMessagesExchanged": session.messageCount,
+            "extractedIntelligence": session.extractedIntelligence.to_dict(),
+            "engagementDurationSeconds": self._calc_duration(session),
+            "agentNotes": session.agentNotes
+        }
+
     def send_from_session(self, session: SessionData) -> bool:
         """
         Send callback directly from SessionData object.
@@ -167,14 +198,7 @@ class GuviCallback:
         Returns:
             True if successful
         """
-        session_data = {
-            "sessionId": session.sessionId,
-            "scamDetected": session.scamDetected,
-            "totalMessagesExchanged": session.messageCount,
-            "extractedIntelligence": session.extractedIntelligence.to_dict(),
-            "agentNotes": session.agentNotes
-        }
-        return self.send_result(session_data)
+        return self.send_result(self._session_to_dict(session))
 
     def send_from_session_async(self, session: SessionData) -> None:
         """
@@ -183,14 +207,7 @@ class GuviCallback:
         Args:
             session: SessionData object
         """
-        session_data = {
-            "sessionId": session.sessionId,
-            "scamDetected": session.scamDetected,
-            "totalMessagesExchanged": session.messageCount,
-            "extractedIntelligence": session.extractedIntelligence.to_dict(),
-            "agentNotes": session.agentNotes
-        }
-        self.send_result_async(session_data)
+        self.send_result_async(self._session_to_dict(session))
 
     def test_connection(self) -> Dict[str, Any]:
         """

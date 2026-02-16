@@ -6,8 +6,10 @@ Enhanced with robust error handling and never-crash guarantees.
 
 import time
 import random
+import asyncio
+import threading
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 from contextlib import asynccontextmanager
 
 import os
@@ -30,7 +32,7 @@ from .models import (
 )
 from .scam_detector import detect_scam, should_activate_agent, hybrid_detector
 from .ai_agent import generate_response, generate_notes, victim_agent
-from .intelligence_extractor import extract_intelligence
+from .intelligence_extractor import extract_intelligence, extract_from_conversation
 from .session_manager import (
     session_manager,
     get_or_create_session,
@@ -50,6 +52,85 @@ _SAFE_FALLBACKS = [
     "I see. Can you tell me more about this?",
     "What do you mean exactly? Please explain.",
 ]
+
+# ── Inactivity-based auto-finalization ──
+# Tracks pending timers per session so we auto-send the final output
+# if the evaluator stops sending messages (waits only 10s for our result).
+_INACTIVITY_SECONDS = 5  # send final output after 5s of silence (evaluator waits 10s)
+_session_timers: Dict[str, threading.Timer] = {}
+_timer_lock = threading.Lock()
+
+
+def _generate_quick_notes(session: SessionData) -> str:
+    """Generate agent notes quickly without AI call (for time-critical finalization)."""
+    intel = session.extractedIntelligence
+    parts = [f"Scam types detected: {', '.join(session.detectedScamTypes) or 'general scam'}."]
+    if intel.phoneNumbers:
+        parts.append(f"Phone numbers: {', '.join(intel.phoneNumbers)}.")
+    if intel.upiIds:
+        parts.append(f"UPI IDs: {', '.join(intel.upiIds)}.")
+    if intel.bankAccounts:
+        parts.append(f"Bank accounts: {', '.join(intel.bankAccounts)}.")
+    if intel.phishingLinks:
+        parts.append(f"Phishing links: {', '.join(intel.phishingLinks)}.")
+    if intel.emailAddresses:
+        parts.append(f"Email addresses: {', '.join(intel.emailAddresses)}.")
+    parts.append(f"Conversation: {session.messageCount} messages exchanged.")
+
+    # Detect tactics from scammer messages
+    tactics = []
+    for msg in session.conversationHistory:
+        if msg.get("sender", "").lower() != "user":
+            text = msg.get("text", "").lower()
+            if any(w in text for w in ["urgent", "immediately", "now", "asap"]):
+                tactics.append("urgency")
+            if any(w in text for w in ["blocked", "suspended", "frozen", "closed"]):
+                tactics.append("threat")
+            if any(w in text for w in ["bank", "rbi", "government", "officer", "department"]):
+                tactics.append("impersonation")
+            if any(w in text for w in ["otp", "pin", "cvv", "password"]):
+                tactics.append("info_extraction")
+    if tactics:
+        parts.append(f"Tactics: {', '.join(set(tactics))}.")
+
+    return " ".join(parts)
+
+
+def _auto_finalize_session(session_id: str) -> None:
+    """Background callback: auto-complete session and send final result."""
+    try:
+        session = get_session_data(session_id)
+        if not session or session.status.value == "completed":
+            return
+
+        logger.info(f"Auto-finalizing session {session_id} due to inactivity")
+
+        # Generate quick notes (no AI call to stay within time window)
+        if not session.agentNotes:
+            notes = _generate_quick_notes(session)
+            update_session(session_id, agent_notes=notes)
+
+        complete_session(session_id, "inactivity_auto_finalize")
+        final_session = get_session_data(session_id)
+        if final_session:
+            send_session_result_async(final_session)
+    except Exception as e:
+        logger.error(f"Auto-finalize error for {session_id}: {e}")
+    finally:
+        with _timer_lock:
+            _session_timers.pop(session_id, None)
+
+
+def _reset_inactivity_timer(session_id: str) -> None:
+    """Reset (or start) the inactivity timer for a session."""
+    with _timer_lock:
+        existing = _session_timers.get(session_id)
+        if existing:
+            existing.cancel()
+        timer = threading.Timer(_INACTIVITY_SECONDS, _auto_finalize_session, args=[session_id])
+        timer.daemon = True
+        timer.start()
+        _session_timers[session_id] = timer
 
 
 # Lifespan context manager for startup/shutdown events
@@ -229,6 +310,17 @@ async def analyze_message(
                     "text": msg.text,
                     "timestamp": msg.timestamp
                 })
+
+        # Extract intelligence from incoming conversation history (first call)
+        if history and session.messageCount <= 1:
+            try:
+                history_intel = extract_from_conversation(history)
+                if history_intel.total_items() > 0:
+                    update_session(session_id, intelligence=history_intel)
+                    logger.info(f"Extracted {history_intel.total_items()} intel items from conversation history")
+            except Exception as e:
+                logger.error(f"History intelligence extraction error: {e}")
+
         history.extend(session.conversationHistory)
 
         # ── Scam detection ──
@@ -310,6 +402,12 @@ async def analyze_message(
 
             if should_end:
                 logger.info(f"Session {session_id} ending: {end_reason}")
+                # Cancel inactivity timer since we're ending now
+                with _timer_lock:
+                    t = _session_timers.pop(session_id, None)
+                    if t:
+                        t.cancel()
+
                 session = get_session_data(session_id)
                 if session:
                     try:
@@ -330,6 +428,10 @@ async def analyze_message(
                             send_session_result_async(final_session)
                         except Exception:
                             logger.error("Failed to send callback")
+            else:
+                # Session still active — reset inactivity timer
+                # If no new message within 7s, auto-finalize and send callback
+                _reset_inactivity_timer(session_id)
         except Exception as e:
             logger.error(f"Session end check error: {e}")
 
@@ -387,6 +489,12 @@ async def end_session(session_id: str, api_key: str = Depends(verify_api_key)):
     session = get_session_data(session_id)
     if not session:
         raise HTTPException(status_code=404, detail={"status": "error", "message": f"Session {session_id} not found"})
+
+    # Cancel inactivity timer
+    with _timer_lock:
+        t = _session_timers.pop(session_id, None)
+        if t:
+            t.cancel()
 
     if not session.agentNotes:
         try:

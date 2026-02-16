@@ -333,11 +333,14 @@ class SessionManager:
             if not session:
                 return None
 
+            duration = (session.lastMessageTime - session.startTime).total_seconds()
+
             return {
                 "sessionId": session.sessionId,
                 "scamDetected": session.scamDetected,
                 "totalMessagesExchanged": session.messageCount,
                 "extractedIntelligence": session.extractedIntelligence.to_dict(),
+                "engagementDurationSeconds": max(duration, 0),
                 "agentNotes": session.agentNotes
             }
 

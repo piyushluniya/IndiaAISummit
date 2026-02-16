@@ -146,6 +146,7 @@ class IntelligenceData(BaseModel):
     upiIds: List[str] = Field(default_factory=list, description="Extracted UPI IDs")
     bankAccounts: List[str] = Field(default_factory=list, description="Extracted bank account numbers")
     phishingLinks: List[str] = Field(default_factory=list, description="Extracted URLs/links")
+    emailAddresses: List[str] = Field(default_factory=list, description="Extracted email addresses")
     suspiciousKeywords: List[str] = Field(default_factory=list, description="Detected suspicious keywords")
 
     def total_items(self) -> int:
@@ -154,7 +155,8 @@ class IntelligenceData(BaseModel):
             len(self.phoneNumbers) +
             len(self.upiIds) +
             len(self.bankAccounts) +
-            len(self.phishingLinks)
+            len(self.phishingLinks) +
+            len(self.emailAddresses)
         )
 
     def merge(self, other: 'IntelligenceData') -> 'IntelligenceData':
@@ -163,6 +165,7 @@ class IntelligenceData(BaseModel):
         self.upiIds = list(set(self.upiIds + other.upiIds))
         self.bankAccounts = list(set(self.bankAccounts + other.bankAccounts))
         self.phishingLinks = list(set(self.phishingLinks + other.phishingLinks))
+        self.emailAddresses = list(set(self.emailAddresses + other.emailAddresses))
         self.suspiciousKeywords = list(set(self.suspiciousKeywords + other.suspiciousKeywords))
         return self
 
@@ -173,6 +176,7 @@ class IntelligenceData(BaseModel):
             "upiIds": self.upiIds,
             "bankAccounts": self.bankAccounts,
             "phishingLinks": self.phishingLinks,
+            "emailAddresses": self.emailAddresses,
             "suspiciousKeywords": self.suspiciousKeywords
         }
 
@@ -241,14 +245,33 @@ class SessionData(BaseModel):
         }
 
 
+class EngagementMetrics(BaseModel):
+    """Schema for engagement metrics in final output."""
+    engagementDurationSeconds: float = Field(0, description="Duration of engagement in seconds")
+    totalMessagesExchanged: int = Field(0, description="Total messages exchanged")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "engagementDurationSeconds": 120.5,
+                "totalMessagesExchanged": 10
+            }
+        }
+
+
 class GuviCallbackPayload(BaseModel):
     """Schema for final callback to GUVI platform."""
     sessionId: str = Field(..., description="Session identifier")
+    status: str = Field("success", description="Status of the session")
     scamDetected: bool = Field(..., description="Whether scam was detected")
     totalMessagesExchanged: int = Field(..., description="Total messages in conversation")
     extractedIntelligence: Dict[str, List[str]] = Field(
         ...,
         description="All extracted intelligence"
+    )
+    engagementMetrics: EngagementMetrics = Field(
+        default_factory=EngagementMetrics,
+        description="Engagement quality metrics"
     )
     agentNotes: str = Field(..., description="Summary notes from AI agent")
 
@@ -256,6 +279,7 @@ class GuviCallbackPayload(BaseModel):
         json_schema_extra = {
             "example": {
                 "sessionId": "abc123",
+                "status": "success",
                 "scamDetected": True,
                 "totalMessagesExchanged": 20,
                 "extractedIntelligence": {
@@ -263,7 +287,12 @@ class GuviCallbackPayload(BaseModel):
                     "upiIds": ["scammer@paytm"],
                     "phishingLinks": [],
                     "phoneNumbers": ["9876543210"],
+                    "emailAddresses": [],
                     "suspiciousKeywords": ["blocked", "verify", "urgent"]
+                },
+                "engagementMetrics": {
+                    "engagementDurationSeconds": 120.5,
+                    "totalMessagesExchanged": 20
                 },
                 "agentNotes": "Scammer attempted bank fraud via UPI. Extracted phone number and UPI ID."
             }
