@@ -19,8 +19,9 @@ class IntelligenceExtractor:
 
     # Indian phone numbers: +91, 91, 0 prefix optional, 10 digits starting 6-9
     # Handles: 9876543210, 98765 43210, 9876-543-210, 987 654 3210, etc.
+    # (?<!\d) ensures we don't match trailing digits of a longer number (e.g. bank account)
     _PHONE_INDIAN = re.compile(
-        r'(?:(?:\+91|91|0)[\s\-.]?)?([6-9](?:\d[\s\-.]?){8}\d)(?!\d)',
+        r'(?<!\d)(?:(?:\+91|91|0)[\s\-.]?)?([6-9](?:\d[\s\-.]?){8}\d)(?!\d)',
     )
     # Parenthesized: (98765) 43210
     _PHONE_PAREN = re.compile(
@@ -37,9 +38,9 @@ class IntelligenceExtractor:
         re.IGNORECASE,
     )
     # UPI obfuscated: user AT paytm, user (at) paytm
+    # Only match explicit markers like (at) or uppercase AT, not lowercase "at" (common English word)
     _UPI_OBFUSCATED = re.compile(
-        r'\b([a-zA-Z0-9.\-_]{2,256})\s*(?:\(at\)|AT|@)\s*([a-zA-Z]{2,64})\b',
-        re.IGNORECASE,
+        r'\b([a-zA-Z0-9.\-_]{2,256})\s*(?:\(at\)|AT)\s*([a-zA-Z]{2,64})\b',
     )
 
     # Bank account numbers (9-18 digits with context)
@@ -104,6 +105,7 @@ class IntelligenceExtractor:
         intel.upiIds = self._extract_upi(message)
         intel.bankAccounts = self._extract_bank_accounts(message)
         intel.phishingLinks = self._extract_links(message)
+        intel.emailAddresses = self.get_emails(message)
         intel.suspiciousKeywords = self._extract_keywords(message)
 
         total = intel.total_items()
@@ -157,12 +159,24 @@ class IntelligenceExtractor:
         # Standard
         for m in self._UPI_STANDARD.finditer(message):
             uid = m.group(1).lower()
+            # Check if this is actually part of an email (followed by .tld or -subdomain with letters)
+            end_pos = m.end()
+            if end_pos < len(message) and message[end_pos] in '.-':
+                # Check if followed by more domain chars (letter after . or -)
+                rest = message[end_pos:]
+                if re.match(r'[.\-][a-zA-Z]', rest):
+                    continue  # likely an email domain, skip
             if self._valid_upi(uid):
                 upi_ids.add(uid)
 
         # Obfuscated (AT / (at))
         for m in self._UPI_OBFUSCATED.finditer(message):
             uid = f"{m.group(1).lower()}@{m.group(2).lower()}"
+            end_pos = m.end()
+            if end_pos < len(message) and message[end_pos] in '.-':
+                rest = message[end_pos:]
+                if re.match(r'[.\-][a-zA-Z]', rest):
+                    continue
             if self._valid_upi(uid):
                 upi_ids.add(uid)
 
@@ -174,14 +188,23 @@ class IntelligenceExtractor:
         username, handle = upi_id.rsplit("@", 1)
         if len(username) < 2:
             return False
-        # Check against known handles
         handle_lower = handle.lower()
+        # Exclude obvious emails (domains with dots like gmail.com)
+        if "." in handle_lower:
+            return False
+        # Check against known handles
         for vh in self._UPI_HANDLES:
             if vh in handle_lower:
                 return True
-        # Bank-like suffix
-        bank_parts = ["bank", "axis", "hdfc", "icici", "sbi", "pnb", "bob", "canara", "kotak"]
-        return any(bp in handle_lower for bp in bank_parts)
+        # Bank-like or payment-related suffix
+        bank_parts = ["bank", "axis", "hdfc", "icici", "sbi", "pnb", "bob", "canara", "kotak",
+                       "pay", "wallet", "cash", "money", "fin", "upi"]
+        if any(bp in handle_lower for bp in bank_parts):
+            return True
+        # Accept any short handle without dots (likely UPI, not email)
+        if len(handle_lower) <= 20:
+            return True
+        return False
 
     # ── Bank account extraction ──
 
@@ -221,18 +244,29 @@ class IntelligenceExtractor:
 
     def _extract_links(self, message: str) -> List[str]:
         links = set()
+        # Collect positions already covered by emails or standard URLs
+        covered_positions = set()
+        for m in self._EMAIL.finditer(message):
+            for i in range(m.start(), m.end()):
+                covered_positions.add(i)
 
         for m in self._URL.finditer(message):
             url = m.group(0).rstrip(".,;:!?)")
             links.add(url)
+            for i in range(m.start(), m.end()):
+                covered_positions.add(i)
 
         for m in self._SHORT_URL.finditer(message):
             links.add(m.group(0))
+            for i in range(m.start(), m.end()):
+                covered_positions.add(i)
 
         # Obfuscated: example[dot]com
         for m in self._URL_OBFUSCATED.finditer(message):
+            # Skip if this overlaps with an already-matched pattern
+            if any(i in covered_positions for i in range(m.start(), m.end())):
+                continue
             full = m.group(0)
-            # Only if it looks like a domain, not normal text
             tld = m.group(2).lower()
             if tld in ("com", "in", "org", "net", "co", "io", "xyz", "tk", "ml", "info", "link"):
                 reconstructed = f"{m.group(1)}.{tld}"
@@ -279,7 +313,9 @@ class IntelligenceExtractor:
     def extract_from_history(self, history: List[Dict]) -> IntelligenceData:
         combined = IntelligenceData()
         for msg in history:
-            if msg.get("sender", "").lower() in ("scammer", "unknown"):
+            sender = msg.get("sender", "").lower()
+            # Extract from scammer messages (any non-user sender)
+            if sender != "user":
                 text = msg.get("text", "")
                 if text:
                     combined.merge(self.extract(text))
