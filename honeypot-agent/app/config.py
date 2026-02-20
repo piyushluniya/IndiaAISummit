@@ -53,8 +53,8 @@ class Settings:
         self.AI_TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.9"))
 
         # Retry Configuration
-        self.MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
-        self.RETRY_DELAY_SECONDS: float = float(os.getenv("RETRY_DELAY_SECONDS", "1.0"))
+        self.MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "2"))
+        self.RETRY_DELAY_SECONDS: float = float(os.getenv("RETRY_DELAY_SECONDS", "0.3"))
 
     def validate(self) -> bool:
         """Validate required configuration settings."""

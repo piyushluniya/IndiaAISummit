@@ -71,6 +71,27 @@ HIGH_RISK_KEYWORDS = {
     "click here": 8, "click link": 8, "click below": 8,
     "visit link": 8, "open link": 8, "update details": 8,
     "verify identity": 9, "confirm identity": 9, "submit": 6,
+    # Electricity/utility
+    "electricity": 6, "disconnected": 8, "power cut": 8, "overdue bill": 8,
+    "outstanding bill": 7, "meter reading": 5,
+    # Customs/parcel
+    "parcel": 6, "customs duty": 8, "seized": 8, "detained": 8,
+    "shipment": 5, "courier": 5, "clearance fee": 8,
+    # Insurance
+    "insurance": 5, "policy": 5, "premium": 5, "matured": 7,
+    "lapsed": 7, "claim amount": 7,
+    # Loan
+    "pre-approved": 8, "loan": 5, "sanctioned": 7, "emi": 5,
+    "processing fee": 9, "stamp duty": 7,
+    # Crypto
+    "crypto": 6, "bitcoin": 6, "ethereum": 6, "mining": 6,
+    "staking": 6, "nft": 5, "token": 4,
+    # Government scheme
+    "subsidy": 6, "yojana": 7, "aadhaar": 6, "pm kisan": 7,
+    "benefit": 4, "grant": 5,
+    # Tech support
+    "virus": 7, "malware": 8, "hacked": 8, "compromised": 8,
+    "antivirus": 6, "remote access": 9,
     # Hindi keywords
     "khata band": 10, "turant": 8, "sत्यापित": 8,
 }
@@ -84,6 +105,16 @@ MEDIUM_RISK_KEYWORDS = {
     "support team": 5, "helpline": 4, "toll free": 4,
     "whatsapp": 3, "telegram": 3, "offer": 3, "deal": 3,
     "limited": 3, "special": 3, "exclusive": 3,
+    # Utility/bills
+    "overdue": 5, "pending": 4, "outstanding": 4, "unpaid": 5,
+    "disconnect": 5, "due date": 4,
+    # Parcel/customs
+    "delivery": 3, "tracking": 3, "warehouse": 3,
+    # Insurance/loan
+    "maturity": 4, "nominee": 3, "beneficiary": 3, "disburse": 4,
+    # General scam indicators
+    "selected": 4, "eligible": 4, "entitled": 4, "receive": 3,
+    "collect": 4, "avail": 3, "complimentary": 4,
 }
 
 
@@ -163,6 +194,39 @@ SCAM_PATTERNS = [
     # Tech support scam
     (r"(?:virus|malware|hacked|compromised)\s+(?:detected|found|in your)", "tech_support", 0.8),
     (r"(?:install|download)\s+(?:this|the)\s+(?:app|software|antivirus)", "tech_support", 0.75),
+
+    # Electricity/utility bill scam
+    (r"(?:electricity|power|gas|water)\s+(?:bill|connection|supply)\s+(?:.*?\s+)?(?:overdue|unpaid|disconnected|pending|due)", "electricity_bill", 0.85),
+    (r"(?:electricity|power|gas|water)\s+(?:.*?\s+)?(?:will be|be)\s+(?:disconnected|cut|terminated|stopped)", "electricity_bill", 0.9),
+    (r"(?:disconnect|cut off|terminate)\s+(?:your)?\s*(?:electricity|power|gas|water|connection)", "electricity_bill", 0.9),
+    (r"(?:pay|clear)\s+(?:your)?\s*(?:outstanding|pending|overdue)\s+(?:bill|dues|amount)", "electricity_bill", 0.7),
+    (r"(?:bill|dues)\s+(?:is|are)?\s*(?:overdue|pending|unpaid|outstanding)", "electricity_bill", 0.75),
+
+    # Government scheme scam
+    (r"(?:government|govt|pm|pradhan mantri)\s+(?:scheme|yojana|subsidy|benefit|grant)", "govt_scheme", 0.8),
+    (r"(?:eligible|selected|entitled)\s+(?:for|to)\s+(?:a|the)?\s*(?:subsidy|benefit|grant|scheme|relief)", "govt_scheme", 0.85),
+    (r"(?:aadhaar|aadhar)\s+(?:linked|verified|required|update)", "govt_scheme", 0.6),
+
+    # Crypto/investment scam
+    (r"(?:crypto|bitcoin|ethereum|nft|token)\s+(?:investment|trading|profit|opportunity)", "crypto_investment", 0.85),
+    (r"(?:guaranteed|assured|minimum)\s+(?:\d+%|\d+x)\s+(?:returns?|profit|gains?)", "crypto_investment", 0.9),
+    (r"(?:mining|staking|defi)\s+(?:pool|platform|opportunity|profit)", "crypto_investment", 0.8),
+
+    # Customs/parcel scam
+    (r"(?:customs|parcel|package|courier|shipment)\s+(?:held|seized|detained|stuck|pending)", "customs_parcel", 0.85),
+    (r"(?:release|clear|collect)\s+(?:your)?\s*(?:parcel|package|shipment|goods)", "customs_parcel", 0.8),
+    (r"(?:customs|import)\s+(?:duty|fee|tax|charge|clearance)", "customs_parcel", 0.75),
+
+    # Insurance scam
+    (r"(?:insurance|policy)\s+(?:.*?\s+)?(?:claim|premium|expired|lapsed|matured|bonus)", "insurance", 0.8),
+    (r"(?:policy|insurance)\s+(?:.*?\s+)?(?:has|is)\s+(?:matured|expired|lapsed)", "insurance", 0.85),
+    (r"(?:claim|collect)\s+(?:your)?\s*(?:insurance|policy|amount|benefit|maturity|bonus)", "insurance", 0.85),
+    (r"(?:policy|insurance)\s+(?:no\.?|number|id)\s*[:.]?\s*[A-Za-z0-9]", "insurance", 0.6),
+
+    # Loan approval scam
+    (r"(?:loan|credit)\s+(?:approved|sanctioned|pre-approved|eligible|offer)", "loan_approval", 0.8),
+    (r"(?:pre-approved|instant|guaranteed)\s+(?:loan|credit|financing)", "loan_approval", 0.85),
+    (r"(?:processing|documentation|stamp duty)\s+fee\s+(?:of|for|rs|₹)", "loan_approval", 0.8),
 ]
 
 _COMPILED_PATTERNS = [(re.compile(p, re.IGNORECASE), t, w) for p, t, w in SCAM_PATTERNS]
@@ -380,9 +444,9 @@ class HybridScamDetector:
             + feat_score * 0.20
         )
 
-        # Blend with ML (rule-based gets more weight for subtle scam detection)
+        # Blend with ML — rules dominate since ML may not cover all 15 scam types
         ml_scam = ml_probs.get("scam", 0.0)
-        final_confidence = (rule_score * 0.60) + (ml_scam * 0.40)
+        final_confidence = (rule_score * 0.75) + (ml_scam * 0.25)
 
         # Pressure tactics analysis
         pressure = analyze_pressure_tactics(clean_msg)
@@ -393,8 +457,8 @@ class HybridScamDetector:
         if pressure["combined_pressure_score"] > 0.5:
             final_confidence = min(1.0, final_confidence + 0.1)
 
-        # Decision
-        is_scam = final_confidence > 0.45
+        # Decision — lower threshold for honeypot (false positives are fine, false negatives lose 20pts)
+        is_scam = final_confidence > 0.35
 
         # Track suspicious turns
         if session_id:
@@ -498,6 +562,13 @@ class HybridScamDetector:
             "tax_legal": ["income tax", "legal action", "court", "arrested", "fir"],
             "kyc_update": ["kyc"],
             "refund_scam": ["refund", "cashback"],
+            "electricity_bill": ["electricity", "power", "bill", "disconnect", "overdue"],
+            "govt_scheme": ["government", "scheme", "subsidy", "yojana", "benefit", "aadhaar"],
+            "crypto_investment": ["crypto", "bitcoin", "ethereum", "mining", "staking", "nft"],
+            "customs_parcel": ["customs", "parcel", "package", "courier", "shipment", "seized"],
+            "insurance": ["insurance", "policy", "premium", "claim", "matured", "lapsed"],
+            "loan_approval": ["loan", "pre-approved", "sanctioned", "emi", "credit"],
+            "tech_support": ["virus", "malware", "hacked", "compromised", "antivirus"],
         }
 
         for stype, kws in keyword_type_map.items():
@@ -514,26 +585,28 @@ class HybridScamDetector:
     ) -> bool:
         """
         Determine if AI agent should be activated.
-        Conditions:
-          A: scam confidence > 0.55
-          B: 2+ suspicious turns in a row
-          C: UPI / link / phone detected in message
+        For a honeypot, we want the agent active for virtually all messages
+        to maximize engagement and intelligence extraction.
         """
-        # Condition A
-        if detection_result.confidence > 0.55 and detection_result.is_scam:
+        # Always activate if any scam detected
+        if detection_result.is_scam:
             return True
 
-        # Condition B
+        # Activate if any suspicious turn
         if session_id:
-            if self.suspicious_count.get(session_id, 0) >= 2:
+            if self.suspicious_count.get(session_id, 0) >= 1:
                 return True
 
-        # Condition C
+        # Activate if any intel detected
         if extracted_intel:
-            if (extracted_intel.get("upiIds")
-                    or extracted_intel.get("phishingLinks")
-                    or extracted_intel.get("phoneNumbers")):
+            if any(extracted_intel.get(k) for k in
+                   ["upiIds", "phishingLinks", "phoneNumbers", "emailAddresses",
+                    "bankAccounts", "caseIds", "policyNumbers", "orderNumbers"]):
                 return True
+
+        # Activate even for moderate confidence — honeypot should always engage
+        if detection_result.confidence > 0.25:
+            return True
 
         return False
 

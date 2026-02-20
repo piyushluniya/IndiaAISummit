@@ -129,106 +129,49 @@ class VictimAgent:
         detected_scam_types: List[str] = None,
         strategy: Dict = None,
     ) -> str:
-        """Build a prompt that prioritizes information elicitation."""
+        """Build a compact prompt that prioritizes information elicitation."""
         persona = strategy["persona"]
         stage = strategy["stage"]
         emotion = strategy["emotion"]
         stage_info = STAGE_STRATEGIES[stage]
-        turn = strategy["turn_number"]
-        missing = strategy.get("missing_info", [])
         target_qs = strategy.get("target_questions", [])
 
         has_scam_context = bool(detected_scam_types)
 
         parts = []
 
-        # Base persona
-        parts.append(f"""You are roleplaying as {persona['name']}, a {persona['age_range']} year old person in India who received a call/message from an unknown number.
+        # Compact persona + situation + objective
+        parts.append(f"You are {persona['name']}, {persona['age_range']}yo in India. {persona['traits']}. Style: {persona['style']}.")
 
-PERSONA:
-- Name: {persona['name']}
-- Tech Savvy: {persona['tech_level']}
-- Personality: {persona['traits']}
-- Communication Style: {persona['style']}""")
-
-        # CORE: Information elicitation strategy
         if has_scam_context:
-            parts.append(f"""
-SITUATION: You suspect this might be a scam ({', '.join(detected_scam_types)}).
-- Stage: {stage} | Emotion: {emotion}
-- Goal: {stage_info['goal']}
-
-YOUR HIDDEN OBJECTIVE (never reveal this):
-You want to EXTRACT as much information as possible from the caller.
-In EVERY response, you must ask for at least ONE of these:
-- Their phone number / callback number
-- Their UPI ID / payment link
-- Their official email address
-- Their employee ID / badge number
-- The official website link
-- Their bank account details for "verification"
-
-WHAT TO ASK FOR RIGHT NOW (pick one):
-{chr(10).join(f"- {q}" for q in target_qs[:3])}
-
-TACTICS: {', '.join(stage_info['tactics'])}""")
+            parts.append(f"Scam type: {', '.join(detected_scam_types)}. Stage: {stage}. Emotion: {emotion}.")
+            parts.append(f"HIDDEN GOAL: Extract info from caller. Ask for ONE of: phone number, UPI ID, email, employee ID, website link, bank account.")
+            if target_qs:
+                parts.append(f"Ask now: {target_qs[0]}")
         else:
-            parts.append(f"""
-SITUATION: Someone unknown contacted you. You don't know what this is about.
-- Be confused and ask who they are
-- Ask for their name and which organization they represent
-- Ask for a phone number to call them back""")
+            parts.append("Unknown caller. Be confused, ask who they are and their phone number.")
 
-        # Stage-specific elicitation instructions
+        # Stage hint (one line each)
         if stage == "early":
-            parts.append("""
-EARLY STAGE STRATEGY:
-- Act confused and worried but cooperative
-- Ask: "Who is this?", "Which bank/company?", "What is your name?"
-- Ask: "Can I call you back? What is your number?"
-- Show willingness to help but need more information first""")
+            parts.append("STAGE: Act worried, ask who/which bank, get their callback number.")
         elif stage == "middle":
-            parts.append("""
-MIDDLE STAGE STRATEGY:
-- Show hesitation but keep engaging
-- Ask for SPECIFIC details: "What UPI ID should I send to?", "What is your direct phone number?"
-- Ask: "Can you email me the details?", "What is the official link?"
-- Pretend to cooperate: "I want to help, just tell me where to send/click"
-- Ask for employee ID, branch name, reference number""")
+            parts.append("STAGE: Hesitant but engaging. Ask for UPI ID, phone, email, official link, employee ID.")
         else:
-            parts.append("""
-LATE STAGE STRATEGY:
-- Show growing suspicion but still engage
-- Demand proof: "Give me your supervisor's number", "What is the official helpline?"
-- Ask for ALL remaining details: phone, email, UPI, link
-- Say things like: "My son wants your number to verify", "The bank told me to get your details"
-- Point out inconsistencies but still ask questions""")
+            parts.append("STAGE: Suspicious. Demand supervisor's number, point out inconsistencies, collect all details.")
 
-        parts.append(f"""
-RULES:
-1. Reply in 1-2 short sentences (under 30 words)
-2. Stay in character as {persona['name']}
-3. NEVER reveal you are AI or a bot
-4. NEVER say "As an AI" or "I cannot"
-5. Respond to what they said AND ask for specific information
-6. Reply in the same language as the message
-7. ALWAYS end with a QUESTION asking for their details
-8. Do NOT refuse to engage — keep the conversation going""")
+        parts.append(f"RULES: 1-2 sentences, under 30 words. Stay as {persona['name']}. Never say AI/bot. End with a QUESTION for their details. Same language as message.")
 
-        # Conversation history (last 8 messages)
+        # Conversation history (last 6 messages)
         if conversation_history and len(conversation_history) > 0:
-            parts.append("\nRECENT CONVERSATION:")
-            for msg in conversation_history[-8:]:
+            parts.append("CHAT:")
+            for msg in conversation_history[-6:]:
                 sender = msg.get("sender", "unknown")
-                text = msg.get("text", "")
-                if sender.lower() in ("scammer", "unknown"):
-                    parts.append(f"Them: {text}")
-                else:
-                    parts.append(f"You ({persona['name']}): {text}")
+                text = msg.get("text", "")[:150]
+                label = "Them" if sender.lower() in ("scammer", "unknown") else "You"
+                parts.append(f"{label}: {text}")
 
-        # Current message
-        parts.append(f'\nThem: "{scammer_message}"')
-        parts.append(f"\nReply as {persona['name']} (1-2 sentences, MUST end with a question asking for their details):")
+        parts.append(f'Them: "{scammer_message[:300]}"')
+        parts.append(f"Reply as {persona['name']}:")
 
         return "\n".join(parts)
 
@@ -404,6 +347,48 @@ RULES:
                 "Which company is this refund from? What is the official website link?",
                 "My son handles refunds. Can you give me your phone number so he can call you back?",
             ],
+            "electricity_bill": [
+                "My electricity bill is pending? Since when? What is your name and phone number?",
+                "Disconnect my power? That is scary! What is your employee ID and office number?",
+                "I paid my bill last month! Can you give me a reference number and your phone number?",
+                "Where should I pay? Can you email me the bill details? What is your email?",
+            ],
+            "customs_parcel": [
+                "A parcel for me? I didn't order anything. What is your name and phone number?",
+                "Customs duty? How much? Can you send me the details by email? What is your email?",
+                "Which courier company? What is the tracking number and your direct phone number?",
+                "My son handles deliveries. Can you give me your official number so he can call?",
+            ],
+            "crypto_investment": [
+                "Crypto investment? How does it work? What is your company name and phone number?",
+                "Guaranteed returns? That sounds too good! What is your official website and email?",
+                "I don't know about crypto. Can you send me details on email? What is your email?",
+                "My husband handles investments. What is your phone number so he can call you?",
+            ],
+            "insurance": [
+                "Insurance claim? Which policy? What is the policy number and your phone number?",
+                "I don't remember this policy. What is your employee ID and official email?",
+                "Premium payment? How much? Can you give me your direct number to verify?",
+                "My son handles insurance. What is your phone number and company name?",
+            ],
+            "loan_approval": [
+                "Loan approved? I never applied! What is your name and bank phone number?",
+                "Pre-approved loan? What bank? Can you give me your employee ID and phone number?",
+                "Processing fee? That sounds suspicious. What is your official email and number?",
+                "My husband deals with loans. What is your direct phone number?",
+            ],
+            "govt_scheme": [
+                "Government scheme? Which one? What is your name and department phone number?",
+                "I am eligible for subsidy? How? Can you give me your official ID and phone number?",
+                "Aadhaar update? I should go to the center. What is your employee ID and email?",
+                "My son handles these things. What is your official phone number?",
+            ],
+            "tech_support": [
+                "Virus on my computer? How do you know? What is your company name and phone number?",
+                "Install software? My son handles computer things. What is your phone number?",
+                "My computer is hacked? That is scary! What is your employee ID and official email?",
+                "Remote access? I don't know how. Can you give me your official website and number?",
+            ],
         }
 
         # ── MIDDLE STAGE — Ask for specific details: UPI, phone, email, link ──
@@ -443,9 +428,25 @@ RULES:
         if stage == "early":
             pool = early.get(scam_type, [])
             if not pool:
+                # Try to match by keywords in scam type name
                 for key, responses in early.items():
                     if any(kw in msg_lower for kw in key.split("_")):
                         pool = responses
+                        break
+            if not pool:
+                # Try to match by message content
+                content_map = {
+                    "electricity": "electricity_bill", "power": "electricity_bill", "bill": "electricity_bill",
+                    "customs": "customs_parcel", "parcel": "customs_parcel", "courier": "customs_parcel",
+                    "crypto": "crypto_investment", "bitcoin": "crypto_investment", "mining": "crypto_investment",
+                    "insurance": "insurance", "policy": "insurance", "premium": "insurance",
+                    "loan": "loan_approval", "pre-approved": "loan_approval", "emi": "loan_approval",
+                    "government": "govt_scheme", "scheme": "govt_scheme", "subsidy": "govt_scheme",
+                    "virus": "tech_support", "malware": "tech_support", "hacked": "tech_support",
+                }
+                for kw, stype in content_map.items():
+                    if kw in msg_lower and stype in early:
+                        pool = early[stype]
                         break
             if not pool:
                 pool = early.get("bank_impersonation", FALLBACK_RESPONSES)
@@ -488,6 +489,12 @@ RULES:
             parts.append(f"Phishing links extracted: {', '.join(intel['phishingLinks'])}.")
         if intel.get("emailAddresses"):
             parts.append(f"Email addresses extracted: {', '.join(intel['emailAddresses'])}.")
+        if intel.get("caseIds"):
+            parts.append(f"Case/reference IDs extracted: {', '.join(intel['caseIds'])}.")
+        if intel.get("policyNumbers"):
+            parts.append(f"Policy numbers extracted: {', '.join(intel['policyNumbers'])}.")
+        if intel.get("orderNumbers"):
+            parts.append(f"Order numbers extracted: {', '.join(intel['orderNumbers'])}.")
 
         # Conversation metrics
         msg_count = len(conversation_history)
@@ -501,7 +508,7 @@ RULES:
         return " ".join(parts) if parts else "Session logged. No definitive scam indicators found."
 
     def _identify_red_flags(self, conversation_history: List[Dict]) -> List[str]:
-        """Identify specific red flags from the conversation."""
+        """Identify specific red flags from the conversation. Aims for 5+ flags for max scoring."""
         flags = []
         scammer_msgs = [
             m.get("text", "").lower()
@@ -513,47 +520,65 @@ RULES:
         # Time pressure
         if any(w in all_text for w in ["urgent", "immediately", "expire", "last chance",
                                         "time is running out", "hurry", "within 24 hours",
-                                        "within 1 hour", "final notice"]):
-            flags.append("Artificial time pressure and urgency")
+                                        "within 1 hour", "final notice", "right now",
+                                        "asap", "fast", "quickly", "deadline", "today only"]):
+            flags.append("Artificial time pressure and urgency tactics")
 
-        # Authority impersonation
+        # Government authority impersonation
         if any(w in all_text for w in ["rbi", "reserve bank", "government", "police",
-                                        "cyber cell", "income tax", "court"]):
-            flags.append("Impersonation of government/regulatory authority")
+                                        "cyber cell", "income tax", "court", "customs",
+                                        "ministry"]):
+            flags.append("Impersonation of government or regulatory authority")
+
+        # Bank/company official impersonation
         if any(w in all_text for w in ["bank officer", "fraud department", "customer care",
-                                        "manager", "supervisor", "senior officer"]):
-            flags.append("Impersonation of bank/company official")
+                                        "manager", "supervisor", "senior officer",
+                                        "executive", "representative", "helpline"]):
+            flags.append("Impersonation of bank or company official")
 
         # Sensitive info requests
-        if any(w in all_text for w in ["share otp", "send otp", "tell otp", "otp",
-                                        "pin", "cvv", "password", "mpin"]):
-            flags.append("Request for sensitive credentials (OTP/PIN/CVV)")
+        if any(w in all_text for w in ["otp", "pin", "cvv", "password", "mpin",
+                                        "aadhaar", "pan", "card number", "account number"]):
+            flags.append("Request for sensitive credentials (OTP/PIN/CVV/password)")
 
         # Financial requests
-        if any(w in all_text for w in ["send money", "transfer", "pay", "send rs",
-                                        "verification payment", "processing fee"]):
-            flags.append("Request for money transfer/payment")
+        if any(w in all_text for w in ["send money", "transfer", "pay", "deposit", "fee",
+                                        "charge", "processing fee", "verification payment",
+                                        "advance payment"]):
+            flags.append("Request for money transfer or payment")
 
         # Threatening language
         if any(w in all_text for w in ["blocked", "suspended", "frozen", "closed",
                                         "legal action", "arrest", "fine", "penalty",
-                                        "blacklist", "seized"]):
-            flags.append("Threatening with account suspension/legal action")
+                                        "blacklist", "seized", "warrant", "fir", "jail",
+                                        "terminate", "deactivate"]):
+            flags.append("Threatening with account suspension or legal consequences")
 
         # Suspicious links
-        if any(w in all_text for w in ["click", "http", "link", "visit", "url"]):
-            flags.append("Sharing suspicious links/URLs")
+        if any(w in all_text for w in ["click", "http", "link", "visit", "url",
+                                        "download", "install", "website"]):
+            flags.append("Sharing suspicious links or URLs")
 
         # Too-good-to-be-true offers
         if any(w in all_text for w in ["won", "winner", "prize", "lottery",
-                                        "cashback", "reward", "free", "discount"]):
-            flags.append("Unrealistic offers/prizes as bait")
+                                        "cashback", "reward", "free", "discount",
+                                        "offer", "deal", "selected", "lucky"]):
+            flags.append("Unrealistic offers, prizes, or lottery as social engineering bait")
 
-        # Info escalation (asking for more and more)
+        # KYC/verification scam
+        if any(w in all_text for w in ["kyc", "verify identity", "confirm identity",
+                                        "expired", "pending verification", "mandatory update"]):
+            flags.append("Fake KYC or verification requirement")
+
+        # Info escalation
         sensitive_asks = sum(1 for msg in scammer_msgs
-                          if any(w in msg for w in ["account", "number", "details", "verify", "share"]))
-        if sensitive_asks >= 3:
+                          if any(w in msg for w in ["account", "number", "details", "verify", "share", "send"]))
+        if sensitive_asks >= 2:
             flags.append("Progressive escalation of information requests")
+
+        # Unsolicited contact
+        if len(scammer_msgs) >= 1:
+            flags.append("Unsolicited contact from unknown caller claiming authority")
 
         return flags
 
@@ -563,22 +588,24 @@ RULES:
         for msg in conversation_history:
             if msg.get("sender", "").lower() != "user":
                 text = msg.get("text", "").lower()
-                if any(w in text for w in ["urgent", "immediately", "now", "expire", "hurry", "last chance"]):
+                if any(w in text for w in ["urgent", "immediately", "now", "expire", "hurry", "last chance", "fast"]):
                     tactics.add("urgency_pressure")
-                if any(w in text for w in ["blocked", "suspended", "frozen", "legal", "arrest", "police"]):
+                if any(w in text for w in ["blocked", "suspended", "frozen", "legal", "arrest", "police", "warrant"]):
                     tactics.add("threat_intimidation")
-                if any(w in text for w in ["bank", "rbi", "government", "officer", "department", "customer care"]):
+                if any(w in text for w in ["bank", "rbi", "government", "officer", "department", "customer care", "customs"]):
                     tactics.add("authority_impersonation")
-                if any(w in text for w in ["otp", "pin", "cvv", "password", "verify"]):
+                if any(w in text for w in ["otp", "pin", "cvv", "password", "verify", "aadhaar"]):
                     tactics.add("credential_harvesting")
-                if any(w in text for w in ["send money", "transfer", "pay", "upi"]):
+                if any(w in text for w in ["send money", "transfer", "pay", "upi", "fee", "charge", "deposit"]):
                     tactics.add("financial_extraction")
-                if any(w in text for w in ["click", "link", "http", "visit", "url"]):
+                if any(w in text for w in ["click", "link", "http", "visit", "url", "download"]):
                     tactics.add("phishing_link_distribution")
-                if any(w in text for w in ["won", "prize", "cashback", "reward", "lottery", "free"]):
+                if any(w in text for w in ["won", "prize", "cashback", "reward", "lottery", "free", "offer"]):
                     tactics.add("social_engineering_bait")
-                if any(w in text for w in ["employee id", "sbi-", "my id", "badge", "reference"]):
+                if any(w in text for w in ["employee id", "sbi-", "my id", "badge", "reference", "case no"]):
                     tactics.add("fake_credential_presentation")
+                if any(w in text for w in ["kyc", "update", "expired", "mandatory"]):
+                    tactics.add("fake_verification_requirement")
         return sorted(tactics)
 
 
