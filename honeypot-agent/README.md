@@ -83,19 +83,25 @@ When a session completes, the system submits:
   "sessionId": "abc123",
   "status": "success",
   "scamDetected": true,
+  "scamType": "bank_impersonation",
+  "confidenceLevel": 0.92,
   "totalMessagesExchanged": 20,
+  "engagementDurationSeconds": 120.5,
   "extractedIntelligence": {
     "phoneNumbers": ["+91-9876543210"],
     "bankAccounts": ["1234567890123456"],
     "upiIds": ["scammer.fraud@fakebank"],
     "phishingLinks": ["http://malicious-site.com"],
-    "emailAddresses": ["scammer@fake.com"]
+    "emailAddresses": ["scammer@fake.com"],
+    "caseIds": ["REF-12345"],
+    "policyNumbers": [],
+    "orderNumbers": []
   },
   "engagementMetrics": {
     "engagementDurationSeconds": 120.5,
     "totalMessagesExchanged": 20
   },
-  "agentNotes": "Scam types detected: bank_impersonation. Red flags: Artificial time pressure; Authority impersonation; Credential harvesting. Phone numbers extracted: 9876543210. Tactics: urgency_pressure, threat_intimidation."
+  "agentNotes": "Scam types detected: bank_impersonation. Red flags identified: Artificial time pressure and urgency tactics; Impersonation of bank or company official; Request for sensitive credentials (OTP/PIN/CVV/password); Threatening with account suspension or legal consequences; Unsolicited contact from unknown caller claiming authority. Phone numbers extracted: 9876543210. Scammer tactics observed: authority_impersonation, credential_harvesting, threat_intimidation, urgency_pressure."
 }
 ```
 
@@ -113,19 +119,24 @@ The system uses a **4-layer hybrid detection engine**:
 
 4. **Layer 4 - Feature Scoring**: Structural indicators — urgency words (+0.3), contact info presence (+0.2), links (+0.25), authority impersonation (+0.3), sensitive info requests (+0.4).
 
-**Final confidence** = weighted combination of all layers. Scam threshold: 0.45.
+**Final confidence** = weighted combination of all layers. Scam threshold: 0.35 (optimized for honeypot — minimizes false negatives).
+
+**Supported Scam Types** (15+ categories): bank_impersonation, upi_fraud, otp_theft, phishing_link, investment_scam, job_scam, prize_lottery, tax_legal, kyc_update, refund_scam, electricity_bill, customs_parcel, crypto_investment, insurance, loan_approval, tech_support, govt_scheme.
 
 ### Red Flag Identification
 
-The system identifies and reports specific red flags:
-- **Artificial time pressure**: "urgent", "expire", "last chance", "hurry"
-- **Authority impersonation**: Claiming to be from RBI, police, bank officers
-- **Credential harvesting**: Requesting OTP, PIN, CVV, passwords
-- **Financial extraction**: Requesting money transfers or UPI payments
-- **Threatening language**: Account blocking, legal action, arrest threats
-- **Suspicious link sharing**: Phishing URLs, shortened links
-- **Social engineering bait**: Fake prizes, cashback, lottery offers
+The system identifies and reports 10+ specific red flags in agent notes (aim for 5+ per session):
+- **Artificial time pressure**: "urgent", "expire", "last chance", "hurry", "deadline"
+- **Government authority impersonation**: Claiming to be from RBI, police, customs, income tax
+- **Bank/company official impersonation**: Fake bank officers, fraud departments, customer care
+- **Credential harvesting**: Requesting OTP, PIN, CVV, passwords, Aadhaar, PAN
+- **Financial extraction**: Requesting money transfers, processing fees, advance payments
+- **Threatening language**: Account blocking, legal action, arrest warrants, FIR
+- **Suspicious link sharing**: Phishing URLs, shortened links, download requests
+- **Social engineering bait**: Fake prizes, cashback, lottery, discounts, offers
+- **Fake KYC/verification**: Mandatory KYC updates, identity verification scams
 - **Progressive escalation**: Increasingly aggressive information requests
+- **Unsolicited contact**: Unknown caller claiming authority
 
 ### How We Extract Intelligence
 
@@ -139,6 +150,9 @@ Generic extraction using compiled regex patterns (not hardcoded to test data):
 | Phishing Links | HTTP/HTTPS URLs, short URLs, obfuscated domains | `bit.ly/xxx`, `example[dot]com` |
 | Email Addresses | Standard + obfuscated email patterns | `user@domain.com`, `user (at) domain` |
 | IFSC Codes | 4-letter + 0 + 6-alphanumeric pattern | `SBIN0001234` |
+| Case/Reference IDs | Case no., REF-, CASE-, FIR-, complaint ID patterns | `REF-12345`, `CASE-2026-789` |
+| Policy Numbers | Policy no., POL-, LIC-, insurance ID patterns | `POL-987654`, `LIC-2026-123` |
+| Order Numbers | Order ID, ORD-, TXN-, invoice patterns | `ORD-2026-789`, `INV-456789` |
 
 ### How We Maintain Engagement
 

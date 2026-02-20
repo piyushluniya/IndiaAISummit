@@ -80,7 +80,8 @@ class SessionManager:
         scam_types: Optional[List[str]] = None,
         message: Optional[Dict[str, str]] = None,
         intelligence: Optional[IntelligenceData] = None,
-        agent_notes: Optional[str] = None
+        agent_notes: Optional[str] = None,
+        confidence_level: Optional[float] = None
     ) -> Optional[SessionData]:
         """
         Update session with new data.
@@ -124,6 +125,10 @@ class SessionManager:
             # Update notes
             if agent_notes:
                 session.agentNotes = agent_notes
+
+            # Update confidence level (keep highest)
+            if confidence_level is not None:
+                session.confidenceLevel = max(session.confidenceLevel, confidence_level)
 
             # Update last message time
             session.lastMessageTime = datetime.utcnow()
@@ -194,12 +199,8 @@ class SessionManager:
             if inactivity > timedelta(minutes=settings.SESSION_INACTIVITY_TIMEOUT_MINUTES):
                 return True, "inactivity_timeout"
 
-            # Check if sufficient intelligence extracted
-            intel = session.extractedIntelligence
-            intel_count = intel.total_items()
-            if intel_count >= settings.MIN_INTELLIGENCE_FOR_END * 2 and session.messageCount >= 10:
-                return True, "sufficient_intelligence"
-
+            # Don't end early for intelligence — we want 8+ turns for max conversation quality
+            # Only end if we've hit the absolute max messages
             return False, ""
 
     def mark_completed(self, session_id: str, reason: str = "") -> Optional[SessionData]:

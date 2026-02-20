@@ -67,6 +67,33 @@ class IntelligenceExtractor:
         re.IGNORECASE,
     )
 
+    # Case/Reference IDs: CASE-12345, REF-12345, case no. 12345, complaint ID ABC123, etc.
+    _CASE_ID = re.compile(
+        r'(?:case|ref|reference|complaint|ticket|incident|file)\s*(?:no\.?|number|id|#|:)\s*[:.]?\s*([A-Za-z0-9\-/]{3,30})',
+        re.IGNORECASE,
+    )
+    _CASE_ID_PREFIX = re.compile(
+        r'\b((?:CASE|REF|CRN|TKT|INC|FIR|CR|SR|COMP|FILE)[- /#]?[A-Z0-9\-]{3,20})\b',
+    )
+
+    # Policy Numbers: policy no. 12345, POL-12345, policy number ABC123
+    _POLICY_NUMBER = re.compile(
+        r'(?:policy|insurance)\s*(?:no\.?|number|id|#|:)\s*[:.]?\s*([A-Za-z0-9\-/]{3,30})',
+        re.IGNORECASE,
+    )
+    _POLICY_PREFIX = re.compile(
+        r'\b((?:POL|INS|LIC|POLICY)[- /#]?[A-Z0-9\-]{3,20})\b',
+    )
+
+    # Order Numbers: order ID 12345, ORD-12345, order number ABC123
+    _ORDER_NUMBER = re.compile(
+        r'(?:order|transaction|txn|invoice|bill)\s*(?:no\.?|number|id|#|:)\s*[:.]?\s*([A-Za-z0-9\-/]{3,30})',
+        re.IGNORECASE,
+    )
+    _ORDER_PREFIX = re.compile(
+        r'\b((?:ORD|TXN|INV|BILL|ORDER)[- /#]?[A-Z0-9\-]{3,20})\b',
+    )
+
     # Money amounts
     _MONEY = re.compile(
         r'(?:₹|rs\.?|inr|rupees?)\s*([\d,]+(?:\.\d{1,2})?)',
@@ -106,6 +133,9 @@ class IntelligenceExtractor:
         intel.bankAccounts = self._extract_bank_accounts(message)
         intel.phishingLinks = self._extract_links(message)
         intel.emailAddresses = self.get_emails(message)
+        intel.caseIds = self._extract_case_ids(message)
+        intel.policyNumbers = self._extract_policy_numbers(message)
+        intel.orderNumbers = self._extract_order_numbers(message)
         intel.suspiciousKeywords = self._extract_keywords(message)
 
         total = intel.total_items()
@@ -296,6 +326,42 @@ class IntelligenceExtractor:
         for m in self._MONEY_REVERSE.finditer(message):
             amounts.add(m.group(1).replace(",", ""))
         return list(amounts)
+
+    # ── Case ID extraction ──
+
+    def _extract_case_ids(self, message: str) -> List[str]:
+        ids = set()
+        for m in self._CASE_ID.finditer(message):
+            val = m.group(1).strip().strip(':.')
+            if len(val) >= 3:
+                ids.add(val)
+        for m in self._CASE_ID_PREFIX.finditer(message):
+            ids.add(m.group(1))
+        return list(ids)
+
+    # ── Policy number extraction ──
+
+    def _extract_policy_numbers(self, message: str) -> List[str]:
+        nums = set()
+        for m in self._POLICY_NUMBER.finditer(message):
+            val = m.group(1).strip().strip(':.')
+            if len(val) >= 3:
+                nums.add(val)
+        for m in self._POLICY_PREFIX.finditer(message):
+            nums.add(m.group(1))
+        return list(nums)
+
+    # ── Order number extraction ──
+
+    def _extract_order_numbers(self, message: str) -> List[str]:
+        nums = set()
+        for m in self._ORDER_NUMBER.finditer(message):
+            val = m.group(1).strip().strip(':.')
+            if len(val) >= 3:
+                nums.add(val)
+        for m in self._ORDER_PREFIX.finditer(message):
+            nums.add(m.group(1))
+        return list(nums)
 
     # ── Keyword extraction ──
 

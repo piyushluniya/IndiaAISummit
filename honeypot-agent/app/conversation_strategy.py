@@ -196,6 +196,12 @@ def get_strategy(
         target_questions.append("What is your employee ID?")
     if "link" in missing_info:
         target_questions.append("Can you send me the official link?")
+    if "case_id" in missing_info:
+        target_questions.append("What is the case number or reference ID?")
+    if "policy_number" in missing_info:
+        target_questions.append("What is my policy number?")
+    if "order_number" in missing_info:
+        target_questions.append("What is the order or transaction number?")
 
     emotion = persona["emotion_map"].get(stage, "neutral")
 
@@ -230,6 +236,12 @@ def _get_missing_info(extracted_intel: Dict) -> List[str]:
         missing.append("email")
     if not extracted_intel.get("bankAccounts"):
         missing.append("bank_account")
+    if not extracted_intel.get("caseIds"):
+        missing.append("case_id")
+    if not extracted_intel.get("policyNumbers"):
+        missing.append("policy_number")
+    if not extracted_intel.get("orderNumbers"):
+        missing.append("order_number")
     # Always try to get employee ID
     missing.append("employee_id")
     return missing

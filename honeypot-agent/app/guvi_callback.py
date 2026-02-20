@@ -48,6 +48,9 @@ class GuviCallback:
             "phishingLinks": intelligence.get("phishingLinks", []),
             "phoneNumbers": intelligence.get("phoneNumbers", []),
             "emailAddresses": intelligence.get("emailAddresses", []),
+            "caseIds": intelligence.get("caseIds", []),
+            "policyNumbers": intelligence.get("policyNumbers", []),
+            "orderNumbers": intelligence.get("orderNumbers", []),
             "suspiciousKeywords": intelligence.get("suspiciousKeywords", [])
         }
 
@@ -59,11 +62,18 @@ class GuviCallback:
             totalMessagesExchanged=total_messages
         )
 
+        # Scam type and confidence
+        scam_type = session_data.get("scamType", "")
+        confidence_level = session_data.get("confidenceLevel", 0.0)
+
         return GuviCallbackPayload(
             sessionId=session_data.get("sessionId", ""),
             status="success",
             scamDetected=session_data.get("scamDetected", False),
+            scamType=scam_type,
+            confidenceLevel=confidence_level,
             totalMessagesExchanged=total_messages,
+            engagementDurationSeconds=duration_seconds,
             extractedIntelligence=formatted_intelligence,
             engagementMetrics=engagement_metrics,
             agentNotes=session_data.get("agentNotes", "")
@@ -179,9 +189,14 @@ class GuviCallback:
 
     def _session_to_dict(self, session: SessionData) -> Dict:
         """Convert SessionData to a dict suitable for callback payload."""
+        # Determine primary scam type
+        scam_type = session.detectedScamTypes[0] if session.detectedScamTypes else "generic_scam"
+
         return {
             "sessionId": session.sessionId,
             "scamDetected": session.scamDetected,
+            "scamType": scam_type,
+            "confidenceLevel": session.confidenceLevel,
             "totalMessagesExchanged": session.messageCount,
             "extractedIntelligence": session.extractedIntelligence.to_dict(),
             "engagementDurationSeconds": self._calc_duration(session),
